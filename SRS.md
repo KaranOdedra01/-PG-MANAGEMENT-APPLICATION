@@ -429,33 +429,4 @@ async function tagComplaint(description) {
 
 ---
 
-## 11. Project Timeline
-
-```
-Week 1-2   │ Project setup, Auth, DB schema, Base UI layout
-Week 3-4   │ Room Management + Tenant Onboarding modules
-Week 5-6   │ Rent & Invoice system + Payment tracking
-Week 7     │ Complaint Management module
-Week 8     │ Notice Board + Expense Tracker
-Week 9     │ Gemini AI features integration
-Week 10    │ Reports, Analytics, PDF exports
-Week 11    │ Testing, Bug fixes, Security audit
-Week 12    │ Deployment + Documentation
-```
-
----
-
-## 12. Suggested Enhancements (Bonus)
-
-| Feature | Difficulty | Impact |
-|---|---|---|
-| WhatsApp Bot (Twilio free) | Medium | ⭐⭐⭐⭐⭐ |
-| QR Code for room entry | Easy | ⭐⭐⭐⭐ |
-| Tenant reviews & ratings | Easy | ⭐⭐⭐ |
-| Progressive Web App (PWA) | Medium | ⭐⭐⭐⭐ |
-| Automated late fee calculator | Easy | ⭐⭐⭐⭐ |
-| Google Maps integration | Easy | ⭐⭐⭐ |
-
----
-
 > 📝 **Document prepared for student project use.** All tools and platforms selected are within free tiers suitable for academic demonstration and portfolio projects.
