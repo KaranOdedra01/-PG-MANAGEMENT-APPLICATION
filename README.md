@@ -28,36 +28,6 @@ A modern, full-stack web application designed to automate and streamline daily o
 
 ---
 
-## 📁 Project Structure
-
-`
-pg-management-system/
-├── client/                 # React Frontend (Vite + Tailwind CSS)
-│   ├── public/
-│   ├── src/
-│   │   ├── components/     # Reusable UI components & Sidebar
-│   │   ├── context/        # Auth & State context
-│   │   ├── pages/          # Dashboard, Rooms, Tenants, Invoices, Mess, AI, etc.
-│   │   ├── services/       # API call handlers
-│   │   └── App.jsx
-│   ├── package.json
-│   └── vite.config.js
-│
-├── server/                 # Express Backend
-│   ├── src/
-│   │   ├── config/         # Database and environment configurations
-│   │   ├── controllers/    # Route controllers
-│   │   ├── middleware/     # Auth & validation middlewares
-│   │   ├── models/         # Mongoose schemas (Tenant, Room, Invoice, Complaint, etc.)
-│   │   ├── routes/         # API endpoints
-│   │   └── server.js       # App entry point
-│   ├── .env.example        # Environment variable template
-│   └── package.json
-│
-├── SRS.md                  # Software Requirements Specification
-├── package.json            # Root configuration & scripts
-└── README.md               # Project documentation
-`
 
 ---
 
