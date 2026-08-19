@@ -16,7 +16,7 @@
 8. [UI/UX Guidelines](#8-uiux-guidelines)
 9. [Deployment Plan](#9-deployment-plan-free-tier)
 10. [Gemini Integration Strategy](#10-gemini-integration-strategy)
-11. [Project Timeline](#11-project-timeline)
+
 
 ---
 
