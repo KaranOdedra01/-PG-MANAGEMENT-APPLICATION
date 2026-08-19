@@ -1,0 +1,13 @@
+﻿{
+  "name": "pg-management-system",
+  "version": "1.0.0",
+  "description": "Full-Stack PG Management System with Gemini AI",
+  "scripts": {
+    "server": "npm --prefix server start",
+    "client": "npm --prefix client dev",
+    "test:auth": "node server/test_auth.cjs"
+  },
+  "keywords": ["pg-management", "hostel", "react", "express", "mongodb", "gemini-ai"],
+  "author": "Karan Odedra",
+  "license": "MIT"
+}
