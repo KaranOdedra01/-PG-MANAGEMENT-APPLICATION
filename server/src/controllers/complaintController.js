@@ -1,7 +1,8 @@
-import mongoose from 'mongoose';
 import Complaint from '../models/Complaint.js';
-import { inMemoryComplaints, inMemoryUsers, inMemoryRooms } from '../utils/inMemoryStore.js';
-import { inMemoryTenants } from './tenantController.js';
+import User from '../models/User.js';
+import Tenant from '../models/Tenant.js';
+import Notification from '../models/Notification.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 // @desc    Get all complaints (Admins/Staff see all, Tenants see only own)
 // @route   GET /api/complaints
@@ -9,42 +10,42 @@ import { inMemoryTenants } from './tenantController.js';
 export const getComplaints = async (req, res) => {
   try {
     const role = req.user.role;
-    const userId = req.user._id ? req.user._id.toString() : '';
     const { status, priority, category, search } = req.query;
+    const query = {};
 
-    let results = [...inMemoryComplaints];
-
+    // IDOR Protection: Tenants only see their own complaints
     if (role === 'tenant') {
-      results = results.filter(c => c.tenantId === userId);
+      query.tenantId = req.user._id;
     }
 
     if (status && status !== 'all') {
-      results = results.filter(c => c.status === status);
+      query.status = status;
     }
     if (priority && priority !== 'all') {
-      results = results.filter(c => c.priority === priority);
+      query.priority = priority;
     }
     if (category && category !== 'all') {
-      results = results.filter(c => c.category === category);
+      query.category = category;
     }
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(c => 
-        c.title.toLowerCase().includes(q) || 
-        c.description.toLowerCase().includes(q) ||
-        (c.roomNumber && c.roomNumber.includes(q))
-      );
+      const q = search.trim();
+      query.$or = [
+        { title: { $regex: q, $options: 'i' } },
+        { description: { $regex: q, $options: 'i' } },
+        { roomNumber: { $regex: q, $options: 'i' } },
+        { ticketNumber: { $regex: q, $options: 'i' } }
+      ];
     }
 
-    results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const complaints = await Complaint.find(query).sort({ createdAt: -1 });
 
-    res.json({
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: complaints.length,
+      data: complaints
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -54,11 +55,26 @@ export const getComplaints = async (req, res) => {
 export const getComplaintById = async (req, res) => {
   try {
     const { id } = req.params;
-    const complaint = inMemoryComplaints.find(c => c._id.toString() === id.toString());
-    if (!complaint) return res.status(404).json({ success: false, message: 'Complaint not found' });
-    res.json({ success: true, data: complaint });
+    const complaint = await Complaint.findById(id);
+
+    if (!complaint) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    // IDOR Protection: Tenants can only view their own complaint
+    if (req.user.role === 'tenant' && complaint.tenantId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You can only view your own complaints'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: complaint
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -69,103 +85,155 @@ export const createComplaint = async (req, res) => {
   try {
     const { title, description, category = 'other', priority = 'medium', roomNumber, attachments = [] } = req.body;
 
-    if (!title || !description) {
-      return res.status(400).json({ success: false, message: 'Please provide title and description' });
-    }
-
     let assignedRoom = roomNumber;
-    if (!assignedRoom && req.user.role === 'tenant') {
-      const t = inMemoryTenants.find(ten => ten.userId === req.user._id.toString()) ||
-                inMemoryUsers.find(u => u._id.toString() === req.user._id.toString());
-      assignedRoom = t?.roomNumber || '102';
+    if (!assignedRoom) {
+      const tenant = await Tenant.findOne({ userId: req.user._id });
+      assignedRoom = tenant?.roomNumber || req.user.roomNumber || 'General';
     }
 
-    const newComplaint = {
-      _id: 'cmp_' + Date.now(),
-      tenantId: req.user._id ? req.user._id.toString() : 'usr_anon',
-      tenantName: req.user.name || 'Tenant Resident',
-      roomNumber: assignedRoom || '101',
-      title,
-      description,
+    const complaint = await Complaint.create({
+      tenantId: req.user._id,
+      tenantName: req.user.name,
+      roomNumber: assignedRoom,
+      title: title.trim(),
+      description: description.trim(),
       category: category.toLowerCase(),
       priority: priority.toLowerCase(),
       status: 'open',
       assignedTo: 'Unassigned',
       resolutionNote: '',
-      attachments: Array.isArray(attachments) ? attachments : [],
-      createdAt: new Date()
-    };
+      attachments: Array.isArray(attachments) ? attachments : []
+    });
 
-    inMemoryComplaints.unshift(newComplaint);
+    // Notify Admins & Staff
+    const adminsAndStaff = await User.find({ role: { $in: ['admin', 'staff'] } });
+    for (const admin of adminsAndStaff) {
+      await Notification.create({
+        recipient: admin._id,
+        type: 'complaint',
+        title: `New [${priority.toUpperCase()}] Complaint: ${complaint.title}`,
+        message: `${req.user.name} from Room #${assignedRoom} raised a ${category} complaint.`,
+        link: '/complaints'
+      });
+    }
 
-    res.status(201).json({
+    await logActivity({
+      user: req.user,
+      action: 'RAISE_COMPLAINT',
+      entity: 'Complaint',
+      entityId: complaint._id,
+      description: `Raised complaint ticket #${complaint.ticketNumber || complaint._id}: ${complaint.title}`
+    });
+
+    return res.status(201).json({
       success: true,
-      message: 'Maintenance complaint ticket #' + newComplaint._id + ' logged successfully',
-      data: newComplaint
+      message: `Maintenance complaint ticket #${complaint.ticketNumber || complaint._id} logged successfully`,
+      data: complaint
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Update Complaint Status (open -> in-progress -> resolved)
+// @desc    Update Complaint Status
 // @route   PATCH /api/complaints/:id/status
 // @access  Private (Admin & Staff)
 export const updateComplaintStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, resolutionNote = '' } = req.body;
+    const { status, resolutionNote = '', actualCost = 0 } = req.body;
 
-    if (!['open', 'in-progress', 'resolved'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status value' });
-    }
-
-    const complaint = inMemoryComplaints.find(c => c._id.toString() === id.toString());
+    const complaint = await Complaint.findById(id);
     if (!complaint) {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
     complaint.status = status;
-    if (resolutionNote) complaint.resolutionNote = resolutionNote;
+    if (resolutionNote) complaint.resolutionNote = resolutionNote.trim();
+    if (actualCost) complaint.actualCost = Number(actualCost);
+
     if (status === 'resolved') {
       complaint.resolvedAt = new Date();
     }
+    if (status === 'closed') {
+      complaint.closedAt = new Date();
+    }
 
-    res.json({
+    await complaint.save();
+
+    // Notify Tenant
+    await Notification.create({
+      recipient: complaint.tenantId,
+      type: 'complaint',
+      title: `Complaint Status Update: ${status.toUpperCase()}`,
+      message: `Your complaint #${complaint.ticketNumber || complaint._id} is now ${status}. ${resolutionNote ? `Note: ${resolutionNote}` : ''}`,
+      link: '/complaints'
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_COMPLAINT_STATUS',
+      entity: 'Complaint',
+      entityId: complaint._id,
+      description: `Updated complaint #${complaint.ticketNumber || complaint._id} status to ${status}`
+    });
+
+    return res.json({
       success: true,
-      message: 'Complaint status updated to ' + status,
+      message: `Complaint status updated to ${status}`,
       data: complaint
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // @desc    Assign Staff to Complaint
 // @route   PATCH /api/complaints/:id/assign
-// @access  Private (Admin Only)
+// @access  Private (Admin & Staff)
 export const assignComplaint = async (req, res) => {
   try {
     const { id } = req.params;
-    const { assignedTo } = req.body;
+    const { assignedTo, assignedStaffId } = req.body;
 
-    const complaint = inMemoryComplaints.find(c => c._id.toString() === id.toString());
+    const complaint = await Complaint.findById(id);
     if (!complaint) {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
-    complaint.assignedTo = assignedTo || 'Ramesh Caretaker';
+    complaint.assignedTo = assignedTo.trim();
+    if (assignedStaffId) complaint.assignedStaffId = assignedStaffId;
+    complaint.assignedAt = new Date();
     if (complaint.status === 'open') {
-      complaint.status = 'in-progress';
+      complaint.status = 'assigned';
     }
 
-    res.json({
+    await complaint.save();
+
+    // Notify Tenant
+    await Notification.create({
+      recipient: complaint.tenantId,
+      type: 'complaint',
+      title: 'Complaint Assigned',
+      message: `Your complaint #${complaint.ticketNumber || complaint._id} has been assigned to ${complaint.assignedTo}.`,
+      link: '/complaints'
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'ASSIGN_COMPLAINT',
+      entity: 'Complaint',
+      entityId: complaint._id,
+      description: `Assigned complaint #${complaint.ticketNumber || complaint._id} to ${complaint.assignedTo}`
+    });
+
+    return res.json({
       success: true,
-      message: 'Complaint assigned to ' + complaint.assignedTo,
+      message: `Complaint assigned to ${complaint.assignedTo}`,
       data: complaint
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -175,14 +243,27 @@ export const assignComplaint = async (req, res) => {
 export const deleteComplaint = async (req, res) => {
   try {
     const { id } = req.params;
-    const index = inMemoryComplaints.findIndex(c => c._id.toString() === id.toString());
-    if (index === -1) {
+    const complaint = await Complaint.findById(id);
+
+    if (!complaint) {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
-    inMemoryComplaints.splice(index, 1);
-    res.json({ success: true, message: 'Complaint deleted successfully' });
+    await complaint.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_COMPLAINT',
+      entity: 'Complaint',
+      entityId: id,
+      description: `Deleted complaint #${complaint.ticketNumber || id}`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Complaint deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

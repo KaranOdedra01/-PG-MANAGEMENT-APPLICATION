@@ -1,42 +1,47 @@
-import mongoose from 'mongoose';
 import Expense from '../models/Expense.js';
-import { inMemoryExpenses, inMemoryInvoices } from '../utils/inMemoryStore.js';
+import Invoice from '../models/Invoice.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 // @desc    Get all expenses with filter & search
 // @route   GET /api/expenses
-// @access  Private (Admin Only)
+// @access  Private (Admin & Staff)
 export const getExpenses = async (req, res) => {
   try {
     const { category, search, month } = req.query;
-    let results = [...inMemoryExpenses];
+    const query = {};
 
     if (category && category !== 'all') {
-      results = results.filter(e => e.category.toLowerCase() === category.toLowerCase());
+      query.category = category.toLowerCase();
     }
+
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(e => 
-        e.description.toLowerCase().includes(q) || 
-        e.category.toLowerCase().includes(q)
-      );
+      const q = search.trim();
+      query.$or = [
+        { description: { $regex: q, $options: 'i' } },
+        { category: { $regex: q, $options: 'i' } },
+        { receiptRef: { $regex: q, $options: 'i' } }
+      ];
     }
+
     if (month && month !== 'all') {
-      results = results.filter(e => {
-        const d = new Date(e.date);
-        const expMonth = d.toLocaleString('default', { month: 'long', year: 'numeric' });
-        return expMonth.toLowerCase().includes(month.toLowerCase());
-      });
+      // Month could be e.g. "August" or "2026-08"
+      const date = new Date(month);
+      if (!isNaN(date.getTime())) {
+        const start = new Date(date.getFullYear(), date.getMonth(), 1);
+        const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
+        query.date = { $gte: start, $lte: end };
+      }
     }
 
-    results.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const expenses = await Expense.find(query).sort({ date: -1, createdAt: -1 });
 
-    res.json({
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: expenses.length,
+      data: expenses
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -45,14 +50,14 @@ export const getExpenses = async (req, res) => {
 // @access  Private (Admin Only)
 export const getExpenseSummary = async (req, res) => {
   try {
-    const totalExpenses = inMemoryExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalRevenue = inMemoryInvoices
-      .filter(i => i.status === 'paid')
-      .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
-    const netProfit = totalRevenue - totalExpenses;
-    const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0;
+    const expenses = await Expense.find();
+    const paidInvoices = await Invoice.find({ status: 'paid' });
 
-    // Category breakdown
+    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const totalRevenue = paidInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+    const netProfit = totalRevenue - totalExpenses;
+    const profitMargin = totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(1)) : 0;
+
     const categoryTotals = {
       electricity: 0,
       water: 0,
@@ -60,31 +65,33 @@ export const getExpenseSummary = async (req, res) => {
       maintenance: 0,
       internet: 0,
       groceries: 0,
+      cleaning: 0,
+      repairs: 0,
       other: 0
     };
 
-    inMemoryExpenses.forEach(e => {
+    expenses.forEach(e => {
       const cat = e.category?.toLowerCase() || 'other';
       if (categoryTotals[cat] !== undefined) {
         categoryTotals[cat] += e.amount;
       } else {
-        categoryTotals.other += e.amount;
+        categoryTotals.other = (categoryTotals.other || 0) + e.amount;
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         totalRevenue,
         totalExpenses,
         netProfit,
-        profitMargin: Number(profitMargin),
+        profitMargin,
         categoryTotals,
-        expenseCount: inMemoryExpenses.length
+        expenseCount: expenses.length
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -93,33 +100,33 @@ export const getExpenseSummary = async (req, res) => {
 // @access  Private (Admin Only)
 export const createExpense = async (req, res) => {
   try {
-    const { category, amount, description, date = new Date(), paymentMode = 'Bank Transfer', receiptRef = '' } = req.body;
+    const { category, amount, description, date, paymentMode, receiptRef } = req.body;
 
-    if (!category || !amount || !description) {
-      return res.status(400).json({ success: false, message: 'Please provide category, amount, and description' });
-    }
-
-    const newExpense = {
-      _id: 'exp_' + Date.now(),
+    const expense = await Expense.create({
       category: category.toLowerCase(),
       amount: Number(amount),
-      description,
-      date: new Date(date),
-      paymentMode,
-      receiptRef,
-      addedBy: req.user?.name || 'Admin',
-      createdAt: new Date()
-    };
+      description: description.trim(),
+      date: date ? new Date(date) : new Date(),
+      paymentMode: paymentMode || 'Bank Transfer',
+      receiptRef: receiptRef ? receiptRef.trim() : '',
+      addedBy: req.user?.name || 'Admin'
+    });
 
-    inMemoryExpenses.unshift(newExpense);
+    await logActivity({
+      user: req.user,
+      action: 'CREATE_EXPENSE',
+      entity: 'Expense',
+      entityId: expense._id,
+      description: `Logged expense of ₹${expense.amount} for ${expense.category}: ${expense.description}`
+    });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Expense recorded successfully',
-      data: newExpense
+      data: expense
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -131,29 +138,35 @@ export const updateExpense = async (req, res) => {
     const { id } = req.params;
     const { category, amount, description, date, paymentMode, receiptRef } = req.body;
 
-    const index = inMemoryExpenses.findIndex(e => e._id.toString() === id.toString());
-    if (index === -1) {
+    const expense = await Expense.findById(id);
+    if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
 
-    const current = inMemoryExpenses[index];
-    inMemoryExpenses[index] = {
-      ...current,
-      category: category ? category.toLowerCase() : current.category,
-      amount: amount !== undefined ? Number(amount) : current.amount,
-      description: description || current.description,
-      date: date ? new Date(date) : current.date,
-      paymentMode: paymentMode || current.paymentMode,
-      receiptRef: receiptRef !== undefined ? receiptRef : current.receiptRef
-    };
+    if (category) expense.category = category.toLowerCase();
+    if (amount !== undefined) expense.amount = Number(amount);
+    if (description) expense.description = description.trim();
+    if (date) expense.date = new Date(date);
+    if (paymentMode) expense.paymentMode = paymentMode;
+    if (receiptRef !== undefined) expense.receiptRef = receiptRef.trim();
 
-    res.json({
+    await expense.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_EXPENSE',
+      entity: 'Expense',
+      entityId: expense._id,
+      description: `Updated expense record #${expense._id}`
+    });
+
+    return res.json({
       success: true,
       message: 'Expense updated successfully',
-      data: inMemoryExpenses[index]
+      data: expense
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -163,14 +176,27 @@ export const updateExpense = async (req, res) => {
 export const deleteExpense = async (req, res) => {
   try {
     const { id } = req.params;
-    const index = inMemoryExpenses.findIndex(e => e._id.toString() === id.toString());
-    if (index === -1) {
+    const expense = await Expense.findById(id);
+
+    if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
 
-    inMemoryExpenses.splice(index, 1);
-    res.json({ success: true, message: 'Expense record deleted' });
+    await expense.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_EXPENSE',
+      entity: 'Expense',
+      entityId: id,
+      description: `Deleted expense record of ₹${expense.amount} (${expense.category})`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Expense record deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

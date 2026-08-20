@@ -1,8 +1,8 @@
-import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import Tenant from '../models/Tenant.js';
-import { inMemoryInvoices, inMemoryUsers, inMemoryRooms } from '../utils/inMemoryStore.js';
-import { inMemoryTenants } from './tenantController.js';
+import User from '../models/User.js';
+import Notification from '../models/Notification.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 // @desc    Get Invoices (Admin/Staff gets all with filters, Tenant gets only own)
 // @route   GET /api/invoices
@@ -10,99 +10,153 @@ import { inMemoryTenants } from './tenantController.js';
 export const getInvoices = async (req, res) => {
   try {
     const role = req.user.role;
-    const userId = req.user._id ? req.user._id.toString() : '';
     const { status, month, search } = req.query;
+    const query = {};
 
-    let results = [...inMemoryInvoices];
-
-    // If Tenant, only show their own invoices
+    // IDOR Protection: Tenants can ONLY see their own invoices
     if (role === 'tenant') {
-      results = results.filter(i => i.tenantId === userId);
+      query.tenantId = req.user._id;
     }
 
     if (status && status !== 'all') {
-      results = results.filter(i => i.status === status);
+      query.status = status;
     }
+
     if (month && month !== 'all') {
-      results = results.filter(i => i.month.toLowerCase().includes(month.toLowerCase()));
+      query.month = { $regex: month.trim(), $options: 'i' };
     }
+
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(i => 
-        (i.tenantName && i.tenantName.toLowerCase().includes(q)) || 
-        (i.roomNumber && i.roomNumber.toLowerCase().includes(q))
-      );
+      const q = search.trim();
+      query.$or = [
+        { tenantName: { $regex: q, $options: 'i' } },
+        { roomNumber: { $regex: q, $options: 'i' } },
+        { invoiceNumber: { $regex: q, $options: 'i' } }
+      ];
     }
 
-    // Sort by dueDate descending
-    results.sort((a, b) => new Date(b.dueDate) - new Date(a.dueDate));
+    const invoices = await Invoice.find(query).sort({ dueDate: -1, createdAt: -1 });
 
-    res.json({
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: invoices.length,
+      data: invoices
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get Single Invoice
+// @desc    Get Single Invoice by ID
 // @route   GET /api/invoices/:id
 // @access  Private
 export const getInvoiceById = async (req, res) => {
   try {
     const { id } = req.params;
-    const invoice = inMemoryInvoices.find(i => i._id.toString() === id.toString());
-    if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
-    res.json({ success: true, data: invoice });
+    const invoice = await Invoice.findById(id);
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
+    // IDOR Protection: Tenants can only view their own invoice
+    if (req.user.role === 'tenant' && invoice.tenantId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You can only view your own invoices'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: invoice
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Create Single Invoice
+// @desc    Create Single Invoice (Server-calculated totalAmount)
 // @route   POST /api/invoices
 // @access  Private (Admin Only)
 export const createInvoice = async (req, res) => {
   try {
-    const { tenantId, month, baseRent, electricityCharge = 0, maintenanceFee = 0, dueDate } = req.body;
+    const { 
+      tenantId, 
+      month, 
+      baseRent, 
+      electricityCharge = 0, 
+      maintenanceFee = 0, 
+      messFee = 0,
+      lateFee = 0,
+      discount = 0,
+      dueDate 
+    } = req.body;
 
-    if (!tenantId || !month || !baseRent || !dueDate) {
-      return res.status(400).json({ success: false, message: 'Please provide tenantId, month, baseRent, and dueDate' });
+    // Find tenant details
+    const tenantUser = await User.findById(tenantId) || await Tenant.findOne({ userId: tenantId });
+    let tenantName = 'Tenant Resident';
+    let roomNumber = '101';
+    let targetUserId = tenantId;
+
+    if (tenantUser) {
+      tenantName = tenantUser.name;
+      roomNumber = tenantUser.roomNumber || '101';
+      targetUserId = tenantUser._id || tenantUser.userId;
     }
 
-    const tenantUser = inMemoryUsers.find(u => u._id.toString() === tenantId.toString()) ||
-                       inMemoryTenants.find(t => t.userId.toString() === tenantId.toString() || t._id.toString() === tenantId.toString());
+    // Server-side calculation
+    const totalAmount = Math.max(0, 
+      Number(baseRent) + 
+      Number(electricityCharge) + 
+      Number(maintenanceFee) + 
+      Number(messFee) + 
+      Number(lateFee) - 
+      Number(discount)
+    );
 
-    const totalAmount = Number(baseRent) + Number(electricityCharge) + Number(maintenanceFee);
-
-    const newInvoice = {
-      _id: 'inv_' + Date.now(),
-      tenantId: tenantUser?.userId || tenantId,
-      tenantName: tenantUser?.name || 'Tenant Resident',
-      roomNumber: tenantUser?.roomNumber || '101',
-      month,
+    const invoice = await Invoice.create({
+      tenantId: targetUserId,
+      tenantName,
+      roomNumber,
+      month: month.trim(),
       baseRent: Number(baseRent),
       electricityCharge: Number(electricityCharge),
       maintenanceFee: Number(maintenanceFee),
+      messFee: Number(messFee),
+      lateFee: Number(lateFee),
+      discount: Number(discount),
       totalAmount,
       status: 'pending',
       dueDate: new Date(dueDate),
       paidDate: null,
-      paymentMode: 'Pending',
-      createdAt: new Date()
-    };
+      paymentMode: 'Pending'
+    });
 
-    inMemoryInvoices.unshift(newInvoice);
+    // In-app Notification for tenant
+    await Notification.create({
+      recipient: targetUserId,
+      type: 'invoice',
+      title: `New Rent Invoice for ${month}`,
+      message: `Invoice of ₹${totalAmount.toLocaleString()} generated for Room #${roomNumber}. Due date: ${new Date(dueDate).toLocaleDateString()}.`,
+      link: '/invoices'
+    });
 
-    res.status(201).json({
+    await logActivity({
+      user: req.user,
+      action: 'CREATE_INVOICE',
+      entity: 'Invoice',
+      entityId: invoice._id,
+      description: `Created invoice ${invoice.invoiceNumber || invoice._id} for ${tenantName} (₹${totalAmount})`
+    });
+
+    return res.status(201).json({
       success: true,
-      message: 'Invoice created successfully',
-      data: newInvoice
+      message: 'Invoice generated successfully',
+      data: invoice
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -111,9 +165,15 @@ export const createInvoice = async (req, res) => {
 // @access  Private (Admin Only)
 export const generateMonthlyInvoices = async (req, res) => {
   try {
-    const { month = 'September 2026', electricityCharge = 500, maintenanceFee = 200, dueDate } = req.body;
+    const { 
+      month = new Date().toLocaleString('default', { month: 'long', year: 'numeric' }), 
+      electricityCharge = 500, 
+      maintenanceFee = 200, 
+      messFee = 0,
+      dueDate 
+    } = req.body;
 
-    const activeTenants = inMemoryTenants.filter(t => t.status === 'active');
+    const activeTenants = await Tenant.find({ status: 'active' });
     if (activeTenants.length === 0) {
       return res.status(400).json({ success: false, message: 'No active tenants found to bill' });
     }
@@ -123,67 +183,106 @@ export const generateMonthlyInvoices = async (req, res) => {
 
     for (const tenant of activeTenants) {
       // Check if invoice already exists for this tenant & month
-      const exists = inMemoryInvoices.find(i => i.tenantId === tenant.userId && i.month.toLowerCase() === month.toLowerCase());
+      const exists = await Invoice.findOne({
+        tenantId: tenant.userId,
+        month: { $regex: new RegExp(`^${month.trim()}$`, 'i') }
+      });
+
       if (!exists) {
         const baseRent = Number(tenant.monthlyRent) || 7500;
-        const totalAmount = baseRent + Number(electricityCharge) + Number(maintenanceFee);
+        const totalAmount = Math.max(0, baseRent + Number(electricityCharge) + Number(maintenanceFee) + Number(messFee));
 
-        const inv = {
-          _id: 'inv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        const inv = await Invoice.create({
           tenantId: tenant.userId,
           tenantName: tenant.name,
           roomNumber: tenant.roomNumber,
-          month,
+          month: month.trim(),
           baseRent,
           electricityCharge: Number(electricityCharge),
           maintenanceFee: Number(maintenanceFee),
+          messFee: Number(messFee),
           totalAmount,
           status: 'pending',
           dueDate: defaultDueDate,
           paidDate: null,
-          paymentMode: 'Pending',
-          createdAt: new Date()
-        };
-        inMemoryInvoices.unshift(inv);
+          paymentMode: 'Pending'
+        });
+
+        await Notification.create({
+          recipient: tenant.userId,
+          type: 'invoice',
+          title: `Monthly Invoice: ${month}`,
+          message: `Rent invoice of ₹${totalAmount.toLocaleString()} generated for ${month}. Due on ${defaultDueDate.toLocaleDateString()}.`,
+          link: '/invoices'
+        });
+
         generated.push(inv);
       }
     }
 
-    res.status(201).json({
+    await logActivity({
+      user: req.user,
+      action: 'GENERATE_MONTHLY_INVOICES',
+      entity: 'Invoice',
+      description: `Generated ${generated.length} monthly invoices for ${month}`
+    });
+
+    return res.status(201).json({
       success: true,
-      message: 'Generated ' + generated.length + ' monthly invoices for ' + month,
+      message: `Generated ${generated.length} monthly invoices for ${month}`,
       data: generated
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // @desc    Record Invoice Payment
 // @route   PATCH /api/invoices/:id/pay
-// @access  Private (Admin, Staff, or Tenant paying)
+// @access  Private (Admin, Staff, or Tenant)
 export const recordPayment = async (req, res) => {
   try {
     const { id } = req.params;
     const { paymentMode = 'UPI', transactionId = '' } = req.body;
 
-    const invoice = inMemoryInvoices.find(i => i._id.toString() === id.toString());
+    const invoice = await Invoice.findById(id);
     if (!invoice) {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
+    if (req.user.role === 'tenant' && invoice.tenantId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Cannot record payment for another tenant\'s invoice' });
     }
 
     invoice.status = 'paid';
     invoice.paidDate = new Date();
     invoice.paymentMode = paymentMode;
-    invoice.transactionId = transactionId || ('TXN_' + Date.now());
+    invoice.transactionId = transactionId || (`TXN-${Date.now()}`);
+    await invoice.save();
 
-    res.json({
+    await Notification.create({
+      recipient: invoice.tenantId,
+      type: 'payment',
+      title: 'Payment Received!',
+      message: `Your payment of ₹${invoice.totalAmount.toLocaleString()} for ${invoice.month} was successfully recorded via ${paymentMode}.`,
+      link: '/invoices'
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'RECORD_PAYMENT',
+      entity: 'Invoice',
+      entityId: invoice._id,
+      description: `Payment of ₹${invoice.totalAmount} recorded for ${invoice.tenantName} (${paymentMode})`
+    });
+
+    return res.json({
       success: true,
-      message: 'Payment of ₹' + invoice.totalAmount + ' recorded successfully via ' + paymentMode,
+      message: `Payment of ₹${invoice.totalAmount.toLocaleString()} recorded successfully via ${paymentMode}`,
       data: invoice
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -193,13 +292,27 @@ export const recordPayment = async (req, res) => {
 export const deleteInvoice = async (req, res) => {
   try {
     const { id } = req.params;
-    const index = inMemoryInvoices.findIndex(i => i._id.toString() === id.toString());
-    if (index === -1) {
+    const invoice = await Invoice.findById(id);
+
+    if (!invoice) {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
-    inMemoryInvoices.splice(index, 1);
-    res.json({ success: true, message: 'Invoice deleted successfully' });
+
+    await invoice.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_INVOICE',
+      entity: 'Invoice',
+      entityId: id,
+      description: `Deleted invoice ${invoice.invoiceNumber || id} for ${invoice.tenantName}`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Invoice deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

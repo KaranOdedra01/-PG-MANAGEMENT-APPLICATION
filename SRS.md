@@ -1,432 +1,183 @@
 # 🏠 PG Management System — Software Requirements Specification (SRS)
 
-> **Project Type:** Student Project | **AI-Assisted Build:** Google Gemini  
-> **Version:** 1.0 | **Date:** August 2026
+> **Project:** PG Management System (MERN + Gemini AI)  
+> **Version:** 2.0 | **Date:** August 2026 | **Author:** Karan Odedra
 
 ---
 
 ## 📌 Table of Contents
-1. [Project Overview](#1-project-overview)
-2. [Tech Stack & Tools](#2-tech-stack--tools-free--student-friendly)
-3. [System Modules](#3-system-modules)
-4. [Functional Requirements](#4-functional-requirements)
-5. [Non-Functional Requirements](#5-non-functional-requirements)
-6. [Database Schema](#6-database-schema-overview)
-7. [Security Architecture](#7-security-architecture)
-8. [UI/UX Guidelines](#8-uiux-guidelines)
-9. [Deployment Plan](#9-deployment-plan-free-tier)
-10. [Gemini Integration Strategy](#10-gemini-integration-strategy)
-
+1. [Project Overview & Purpose](#1-project-overview)
+2. [Tech Stack & Architecture](#2-tech-stack--architecture)
+3. [User Roles & Access Control](#3-user-roles--access-control)
+4. [Functional Modules](#4-functional-modules)
+5. [Database Schema Design](#5-database-schema-design)
+6. [Security & Cybersecurity Specifications](#6-security--cybersecurity-specifications)
+7. [AI Integration Specifications](#7-ai-integration-specifications)
+8. [Automated Testing & QA](#8-automated-testing--qa)
 
 ---
 
 ## 1. Project Overview
 
 ### 1.1 Purpose
-A full-stack **PG (Paying Guest) Management System** to digitize and automate the daily operations of a PG/hostel — including room management, tenant onboarding, rent collection, complaint tracking, and more.
+A full-stack **PG (Paying Guest) and Hostel Management System** designed to digitize and automate accommodation workflows — including room/bed management, tenant onboarding and KYC, rent invoice generation and payment tracking, maintenance ticketing, mess meal scheduling, gate visitor logging, and AI-assisted resident queries.
 
 ### 1.2 Scope
-The system serves **three roles**:
-- 🏢 **Admin / PG Owner** — Full control
-- 👤 **Tenant** — Self-service portal
-- 🔧 **Staff** — Maintenance & daily operations
-
-### 1.3 Goals
-- Eliminate paper-based processes
-- Automate rent reminders & invoicing
-- Provide real-time occupancy dashboard
-- AI-powered features via **Google Gemini API**
+The system operates with three authenticated roles:
+- 👑 **Admin (PG Owner / Manager)**: Full administrative authority over rooms, tenants, billing, expenses, announcements, staff assignments, and executive reports.
+- 🛠️ **Staff (Caretaker / Maintenance)**: Operational management of maintenance tickets, room inspections, and visitor logs.
+- 🎓 **Tenant (Resident)**: Self-service portal to view room details, download rent invoices, record payments, raise complaints, acknowledge notices, and interact with the AI assistant.
 
 ---
 
-## 2. Tech Stack & Tools (Free & Student-Friendly)
+## 2. Tech Stack & Architecture
 
-| Layer | Technology | Why |
-|---|---|---|
-| **Frontend** | React.js + Tailwind CSS + shadcn/ui | Modern, attractive UI |
-| **Backend** | Node.js + Express.js | Fast, scalable REST API |
-| **Database** | MongoDB Atlas (Free Tier) | 512MB free, no credit card |
-| **Auth** | Firebase Auth (Free) | Google/Email login, secure |
-| **Storage** | Firebase Storage (Free) | Document/image uploads |
-| **Hosting** | Vercel (Frontend) + Render (Backend) | Both free tiers |
-| **AI** | Google Gemini API (Free tier) | Core AI features |
-| **Email** | Resend.com (Free tier) | 3000 emails/month free |
-| **Charts** | Recharts / Chart.js | Dashboard analytics |
+```text
+React 18 + Vite + Tailwind CSS (Frontend)
+   ↓ (Axios HTTP / Bearer JWT)
+Express.js 4 (REST API + Helmet + CORS + Rate Limit)
+   ↓
+Zod Validation Middleware
+   ↓
+Authentication & Authorization Middleware (IDOR Guard)
+   ↓
+Controllers & Services
+   ↓
+Mongoose 8 ODM (Schemas, Indexes, Pre-save Hooks)
+   ↓
+MongoDB / MongoDB Atlas (Single Source of Truth)
+   ↓
+Google Gemini API (@google/generative-ai)
+```
 
----
-
-## 3. System Modules
-
-### 🔷 Module 1 — Auth & Role Management
-- Google SSO + Email/Password login
-- Role-based access: Admin, Tenant, Staff
-- JWT + Firebase Auth tokens
-- Session management & logout
-
-### 🔷 Module 2 — Dashboard (Admin)
-- Real-time occupancy rate (rooms filled/total)
-- Monthly revenue chart
-- Pending dues summary
-- Recent complaints widget
-- Quick actions panel
-
-### 🔷 Module 3 — Room Management
-- Add/Edit/Delete rooms
-- Room types: Single, Double, Triple, Dormitory
-- Room status: Available, Occupied, Under Maintenance
-- Room amenities tagging (AC, WiFi, Attached Bath, etc.)
-- Floor/wing-wise view
-
-### 🔷 Module 4 — Tenant Management
-- Tenant onboarding with ID proof upload
-- Police verification form / Aadhaar upload
-- Emergency contact details
-- Tenant history (past PGs)
-- Tenant profile with photo
-- Check-in / Check-out management
-
-### 🔷 Module 5 — Rent & Payment Management
-- Auto-generate monthly rent invoices
-- Track paid / unpaid / partial payments
-- Payment modes: Cash, UPI, Bank Transfer
-- PDF invoice download
-- Overdue alerts with penalty calculation
-- Receipt generation
-
-### 🔷 Module 6 — Expense Tracker
-- Log PG expenses (electricity, water, maintenance, salaries)
-- Category-wise expense breakdown
-- Monthly P&L summary (Revenue vs Expense)
-- Export to CSV/Excel
-
-### 🔷 Module 7 — Complaint & Maintenance System
-- Tenant raises complaint with photo/description
-- Admin assigns to staff
-- Status tracking: Open → In Progress → Resolved
-- Priority levels: Low, Medium, High, Urgent
-- Complaint history per room
-
-### 🔷 Module 8 — Notice Board & Communication
-- Admin posts notices (visible to all tenants)
-- Email/push notifications for critical alerts
-- Announcement categories: Maintenance, Rules, Events
-- Read receipts for notices
-
-### 🔷 Module 9 — Food / Mess Management (Optional)
-- Weekly meal plan setup
-- Tenant meal subscription (full/half/no mess)
-- Monthly mess bill calculation
-- Daily attendance for mess
-
-### 🔷 Module 10 — Visitor & Gate Management
-- Log visitor entries with timestamp
-- Visitor type: Family, Friend, Delivery
-- Late-night visitor alerts
-- Export visitor logs
-
-### 🔷 Module 11 — Reports & Analytics
-- Occupancy report (monthly/quarterly)
-- Revenue report
-- Tenant turnover report
-- Complaint resolution time report
-- PDF / Excel export
-
-### 🔷 Module 12 — AI Features (Gemini-Powered) 🤖
-- **Smart Complaint Categorizer** — Auto-tags complaints
-- **Rent Reminder Generator** — Personalized reminder messages
-- **Tenant Query Chatbot** — 24/7 AI assistant for tenants
-- **Expense Anomaly Detector** — Flags unusual expenses
-- **Occupancy Trend Predictor** — Forecasts vacancy trends
-- **Document Summarizer** — Summarizes lease agreements
-- **Smart Notice Generator** — Drafts notices from bullet points
-
----
-
-## 4. Functional Requirements
-
-### 4.1 Admin Requirements
-| ID | Requirement |
+| Layer | Technology |
 |---|---|
-| FR-01 | Admin shall be able to add/edit/delete rooms with amenities |
-| FR-02 | Admin shall onboard tenants with document upload |
-| FR-03 | Admin shall generate and send monthly rent invoices |
-| FR-04 | Admin shall view real-time occupancy dashboard |
-| FR-05 | Admin shall manage complaint lifecycle |
-| FR-06 | Admin shall post and schedule notices |
-| FR-07 | Admin shall generate financial reports |
-| FR-08 | Admin shall configure rent rules and late fees |
-| FR-09 | Admin shall add/manage staff accounts |
-| FR-10 | Admin shall export all data to CSV/PDF |
-
-### 4.2 Tenant Requirements
-| ID | Requirement |
-|---|---|
-| FR-11 | Tenant shall log in with email/Google |
-| FR-12 | Tenant shall view their room details and invoice history |
-| FR-13 | Tenant shall raise complaints with attachments |
-| FR-14 | Tenant shall view notice board |
-| FR-15 | Tenant shall download rent receipts as PDF |
-| FR-16 | Tenant shall chat with Gemini AI assistant |
-| FR-17 | Tenant shall update profile & emergency contacts |
-
-### 4.3 Staff Requirements
-| ID | Requirement |
-|---|---|
-| FR-18 | Staff shall view assigned maintenance tasks |
-| FR-19 | Staff shall update task status |
-| FR-20 | Staff shall log visitor entries |
+| **Frontend** | React 18, Vite, Tailwind CSS, Lucide Icons, Axios, React Router DOM, jsPDF |
+| **Backend** | Node.js, Express.js, Mongoose, JWT, bcryptjs, Helmet, Express Rate Limit, Morgan |
+| **Validation** | Zod (Reusable request schemas) |
+| **Database** | MongoDB / MongoDB Atlas (Document DB with indexes and transactions) |
+| **AI Integration** | Google Gemini API (`gemini-1.5-flash`) with dynamic database-backed context |
+| **Testing** | Node.js Test Runner (`node:test`), `node:assert`, Supertest |
 
 ---
 
-## 5. Non-Functional Requirements
+## 3. User Roles & Access Control
 
-| Category | Requirement |
-|---|---|
-| **Performance** | Page load < 2 seconds, API response < 500ms |
-| **Security** | HTTPS, JWT auth, input validation, rate limiting |
-| **Scalability** | Support 200+ tenants without degradation |
-| **Availability** | 99.5% uptime (Vercel + Render SLA) |
-| **Usability** | Mobile-responsive, accessible (WCAG 2.1 AA) |
-| **Maintainability** | Modular code, documented APIs (Swagger) |
-| **Data Privacy** | GDPR-aware, encrypted sensitive documents |
-
----
-
-## 6. Database Schema Overview
-
-### Collections (MongoDB)
-
-#### `users`
-```json
-{
-  "_id": "ObjectId",
-  "name": "string",
-  "email": "string",
-  "role": "admin | tenant | staff",
-  "photo": "url",
-  "phone": "string",
-  "firebaseUID": "string",
-  "createdAt": "Date"
-}
-```
-
-#### `rooms`
-```json
-{
-  "_id": "ObjectId",
-  "roomNumber": "string",
-  "floor": "number",
-  "type": "single | double | triple | dormitory",
-  "status": "available | occupied | maintenance",
-  "rent": "number",
-  "amenities": ["AC", "WiFi", "TV"],
-  "currentTenants": ["userId"],
-  "capacity": "number"
-}
-```
-
-#### `tenants`
-```json
-{
-  "_id": "ObjectId",
-  "userId": "ObjectId",
-  "roomId": "ObjectId",
-  "checkInDate": "Date",
-  "checkOutDate": "Date",
-  "idProof": "url",
-  "emergencyContact": { "name": "string", "phone": "string" },
-  "securityDeposit": "number",
-  "status": "active | inactive"
-}
-```
-
-#### `invoices`
-```json
-{
-  "_id": "ObjectId",
-  "tenantId": "ObjectId",
-  "month": "string",
-  "baseRent": "number",
-  "extras": [{ "label": "string", "amount": "number" }],
-  "totalAmount": "number",
-  "dueDate": "Date",
-  "paidDate": "Date",
-  "status": "pending | paid | overdue | partial",
-  "paymentMode": "cash | upi | bank"
-}
-```
-
-#### `complaints`
-```json
-{
-  "_id": "ObjectId",
-  "tenantId": "ObjectId",
-  "roomId": "ObjectId",
-  "title": "string",
-  "description": "string",
-  "category": "plumbing | electrical | cleaning | other",
-  "priority": "low | medium | high | urgent",
-  "status": "open | in-progress | resolved",
-  "assignedTo": "userId",
-  "attachments": ["url"],
-  "aiTag": "string",
-  "createdAt": "Date"
-}
-```
-
-#### `notices`
-```json
-{
-  "_id": "ObjectId",
-  "title": "string",
-  "content": "string",
-  "category": "maintenance | rules | events | general",
-  "postedBy": "userId",
-  "targetRoles": ["tenant", "staff"],
-  "scheduledAt": "Date",
-  "readBy": ["userId"]
-}
-```
-
-#### `expenses`
-```json
-{
-  "_id": "ObjectId",
-  "category": "electricity | water | salary | maintenance | other",
-  "amount": "number",
-  "description": "string",
-  "date": "Date",
-  "addedBy": "userId",
-  "receipt": "url"
-}
-```
+| Module / Action | Admin | Staff | Tenant |
+|---|---|---|---|
+| **View Dashboard** | Full PG Metrics | Maintenance Queue | Personal Room & Dues |
+| **Manage Rooms (CRUD)** | ✅ Full | 👁️ View & Status | 👁️ View |
+| **Onboard / Checkout Tenant** | ✅ Full | ✅ Full | ❌ No |
+| **Generate Invoices** | ✅ Full | 👁️ View | ❌ No |
+| **View Invoices** | All Invoices | All Invoices | Own Invoices Only |
+| **Record Payment** | ✅ Full | ✅ Full | ✅ Own Invoice |
+| **Manage Expenses** | ✅ Full | 👁️ View | ❌ No |
+| **Raise Complaint** | ✅ Full | ✅ Full | ✅ Own Ticket |
+| **Assign Complaint / Update Status** | ✅ Full | ✅ Full | ❌ No |
+| **Broadcast Notice** | ✅ Full | ✅ Full | 👁️ View Targeted |
+| **Mess Menu & Attendance** | ✅ Full | ✅ Full | ✅ Personal Attendance |
+| **Visitor Gate Check-in/out** | ✅ Full | ✅ Full | ❌ No |
+| **Financial & Occupancy Reports** | ✅ Full | ❌ No | ❌ No |
+| **AI Smart Assistant** | Full Context | Staff Context | Private Tenant Context |
 
 ---
 
-## 7. Security Architecture
+## 4. Functional Modules
 
-```
-┌─────────────────────────────────────────────┐
-│              Client (React)                 │
-│  - Firebase Auth Token (JWT)                │
-│  - HTTPS Only                               │
-│  - Input sanitization (DOMPurify)           │
-└──────────────────┬──────────────────────────┘
-                   │ Bearer Token
-┌──────────────────▼──────────────────────────┐
-│            Express.js API                   │
-│  - Rate Limiting (express-rate-limit)       │
-│  - CORS policy (whitelist only)             │
-│  - Helmet.js (security headers)             │
-│  - JWT Verification Middleware              │
-│  - Role-Based Route Guards                  │
-│  - Input Validation (Zod/Joi)               │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│          MongoDB Atlas                      │
-│  - Encrypted at rest                        │
-│  - IP Whitelisting                          │
-│  - No raw passwords stored                  │
-│  - Field-level encryption for Aadhaar/docs  │
-└─────────────────────────────────────────────┘
-```
+### 4.1 Module 1 — Authentication & Authorization
+- **Public Registration**: Forces role `tenant`. Cannot register as admin or staff.
+- **Admin User Creation**: Only admins can create staff or admin accounts (`POST /api/auth/users`).
+- **Password Security**: Bcryptjs salt hashing. Passwords never returned in API responses.
+- **JWT Protection**: Signed with environment-based `JWT_SECRET` and expiration.
 
-### Key Security Measures
-- ✅ **Never store plain passwords** — Firebase handles auth
-- ✅ **Document encryption** — Sensitive uploads encrypted via Firebase Storage rules
-- ✅ **API rate limiting** — Prevent brute force & DDoS
-- ✅ **Environment variables** — All secrets in `.env`, never committed to Git
-- ✅ **RBAC** — Every API route checks user role before executing
-- ✅ **Audit logs** — Track all admin actions (create, update, delete)
+### 4.2 Module 2 — Dashboard & Real-Time Analytics
+- **Live Metrics**: Aggregate room occupancy, total beds, occupied beds, revenue collected, pending dues, total expenses, net profit, and open complaints.
+- **Activity Log**: Database-driven audit feed recording all system events with timestamps and actors.
 
----
+### 4.3 Module 3 — Room & Bed Management
+- **Bed Tracking**: Room capacity, individual bed slots (`Bed A`, `Bed B`, etc.), occupancy counters, and status transitions (`available`, `occupied`, `maintenance`).
+- **Integrity**: Prevents `occupiedBeds > capacity`, duplicate room numbers, and negative rent.
 
-## 8. UI/UX Guidelines
+### 4.4 Module 4 — Tenant Lifecycle & KYC
+- **Onboarding**: Room and bed assignment, KYC identification (Aadhaar, Passport, College ID), emergency contacts, and security deposit.
+- **Checkout**: Marks status `checked-out`, sets `checkOutDate`, frees room bed slot, and decrements room occupancy.
 
-### Design System
-- **Framework:** Tailwind CSS + shadcn/ui components
-- **Theme:** Light/Dark mode toggle
-- **Color Palette:**
-  - Primary: `#6366F1` (Indigo)
-  - Success: `#22C55E` (Green)
-  - Warning: `#F59E0B` (Amber)
-  - Danger: `#EF4444` (Red)
-  - Background: `#F8FAFC` / Dark: `#0F172A`
+### 4.5 Module 5 — Invoices & Billing
+- **Server-Side Calculation**: `baseRent + electricityCharge + maintenanceFee + messFee + lateFee - discount = totalAmount`.
+- **Payment Lifecycle**: `pending` ➔ `paid` / `partially_paid` / `overdue` / `cancelled`.
+- **PDF Generation**: Instant client-side download of official rent receipts.
 
-### Key UI Components
-- 🎨 Glassmorphism cards for dashboard widgets
-- 📊 Animated charts (Recharts)
-- 🔔 Toast notifications (react-hot-toast)
-- 📱 Mobile-first responsive design
-- 🌙 Dark/Light mode
-- 🔍 Global search with keyboard shortcut (Ctrl+K)
-- 💅 Smooth page transitions (Framer Motion)
-- 📄 PDF previewer in modal
+### 4.6 Module 6 — Operating Expenses
+- **Expense Logging**: Categorized expenses (Electricity, Water, Salary, Maintenance, Internet, Groceries).
+- **P&L Summary**: Revenue vs expenses, net profit, profit margins, and category distribution.
+
+### 4.7 Module 7 — Maintenance & Complaints Hub
+- **Status Lifecycle**: `open` ➔ `assigned` ➔ `in-progress` ➔ `waiting-for-parts` ➔ `resolved` ➔ `closed`.
+- **Ticket Tracking**: Auto-generated ticket number, category tagging, priority levels (`low`, `medium`, `high`, `urgent`), resolution notes, and cost tracking.
+
+### 4.8 Module 8 — Notice Board
+- **Announcements**: Category, priority, pinned status, and role-based targeting (`all`, `tenant`, `staff`, `admin`).
+- **Read Tracking**: Acknowledgment tracking per user.
+
+### 4.9 Module 9 — Mess & Meal Management
+- **Timetable**: 7-day weekly menu timetable (Breakfast, Lunch, Snacks, Dinner).
+- **Attendance**: 1-click meal toggle to prevent kitchen food wastage with live meal headcounts.
+- **Subscriptions**: Meal plans (`full`, `2-meal`, `none`) and dietary preferences.
+
+### 4.10 Module 10 — Visitor Logging
+- **Gate Logging**: Entry timestamp, host tenant association, purpose of visit, vehicle registration, late-night visitor flag, and check-out timestamp.
+
+### 4.11 Module 11 — Reports & Analytics
+- **Executive Summaries**: Aggregated operational, occupancy, and financial metrics.
+- **Data Export**: CSV and PDF export capabilities.
+
+### 4.12 Module 12 — Gemini AI Smart Assistant
+- **Real-Time Context**: Dynamic queries to MongoDB (user's billing, user's room, available rooms, today's menu, active notices).
+- **Privacy Filter**: Strict isolation preventing tenants from querying other tenants' private information.
+- **Tools**: AI Chatbot, automated complaint classifier & priority tagger, and rent reminder composer.
 
 ---
 
-## 9. Deployment Plan (Free Tier)
+## 5. Database Schema Design
 
-| Service | Platform | Free Limit |
-|---|---|---|
-| **Frontend** | Vercel | Unlimited deployments, 100GB bandwidth |
-| **Backend** | Render | 750 hrs/month (always-on with spin-up delay) |
-| **Database** | MongoDB Atlas | 512MB storage free |
-| **Auth** | Firebase | 10K auth/month free |
-| **File Storage** | Firebase Storage | 1GB free |
-| **Email** | Resend.com | 3,000 emails/month free |
-| **AI** | Gemini API | Free tier available |
-| **CI/CD** | GitHub Actions | 2,000 min/month free |
-
-### Deployment Architecture
-```
-GitHub Repo
-  ├── /client  → Push to Vercel (auto-deploy)
-  └── /server  → Push to Render (auto-deploy)
-        └── Connects to MongoDB Atlas
-        └── Uses Firebase Admin SDK
-        └── Calls Gemini API
-```
+### 5.1 Entities
+- **`User`**: `name`, `email` (unique, indexed), `password` (select: false), `role`, `phone`, `roomId`, `roomNumber`, `isActive`, `emergencyContact`.
+- **`Room`**: `roomNumber` (unique, indexed), `floor`, `type`, `capacity`, `occupiedBeds`, `rent`, `status`, `amenities`, `beds`, `tenants`.
+- **`Tenant`**: `userId` (indexed), `roomId` (indexed), `roomNumber`, `bedNumber`, `name`, `email` (indexed), `phone`, `checkInDate`, `checkOutDate`, `securityDeposit`, `monthlyRent`, `idProofType`, `idProofNumber`, `status`.
+- **`Invoice`**: `invoiceNumber` (unique, indexed), `tenantId` (indexed), `tenantName`, `roomNumber`, `month` (indexed), `baseRent`, `electricityCharge`, `maintenanceFee`, `messFee`, `lateFee`, `discount`, `totalAmount`, `status`, `dueDate`, `paidDate`, `paymentMode`.
+- **`Expense`**: `category` (indexed), `amount`, `description`, `date` (indexed), `paymentMode`, `receiptRef`, `addedBy`.
+- **`Complaint`**: `ticketNumber` (unique, indexed), `tenantId` (indexed), `tenantName`, `roomNumber`, `title`, `description`, `category`, `priority`, `status`, `assignedTo`, `assignedStaffId`, `resolutionNote`, `actualCost`.
+- **`Notice`**: `title`, `content`, `category`, `priority`, `targetRoles`, `postedBy`, `isPinned`, `readBy`.
+- **`MessMenu`**: `day` (unique, indexed), `breakfast`, `lunch`, `snacks`, `dinner`, `specialNote`.
+- **`MealSubscription`**: `userId` (unique, indexed), `plan`, `monthlyCharge`, `diet`, `attendance`.
+- **`Visitor`**: `name`, `phone`, `visitorType`, `tenantId`, `tenantName`, `roomNumber`, `purpose`, `vehicleNumber`, `entryTime`, `exitTime`, `status`, `isLateNight`.
+- **`Notification`**: `recipient` (indexed), `type`, `title`, `message`, `link`, `isRead`.
+- **`ActivityLog`**: `actor`, `action` (indexed), `entity` (indexed), `entityId`, `description`, `metadata`, `createdAt` (indexed).
 
 ---
 
-## 10. Gemini Integration Strategy
+## 6. Security & Cybersecurity Specifications
 
-### How Gemini Powers Each Feature
-
-| Feature | Gemini Prompt Strategy |
-|---|---|
-| **Chatbot** | System prompt with PG context + tenant data |
-| **Complaint Tagger** | Zero-shot classification prompt |
-| **Notice Generator** | Few-shot examples + structured output |
-| **Expense Anomaly** | Chain-of-thought analysis |
-| **Rent Reminder** | Personalization with tenant name + amount |
-| **Document Summary** | RAG-lite: extract → chunk → summarize |
-| **Occupancy Forecast** | Gemini + historical data analysis |
-
-### Sample Gemini Integration (Node.js)
-```javascript
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-// Auto-tag complaint category
-async function tagComplaint(description) {
-  const prompt = `
-    Classify this PG complaint into one category:
-    [plumbing, electrical, cleaning, internet, noise, security, other]
-    
-    Complaint: "${description}"
-    
-    Return JSON: { "category": "...", "priority": "low|medium|high|urgent", "summary": "..." }
-  `;
-  const result = await model.generateContent(prompt);
-  return JSON.parse(result.response.text());
-}
-```
+1. **Zero In-Memory Storage**: MongoDB is the sole source of truth.
+2. **IDOR Defense**: All tenant routes verify resource ownership.
+3. **Password Security**: Bcrypt with salt rounds, no plain-text storage or return.
+4. **Input Validation**: Strict Zod schemas validating types, bounds, lengths, and formats.
+5. **Rate Limiting**: Brute-force protection on authentication and AI endpoints.
+6. **Security Headers**: Helmet with cross-origin policies and environment CORS.
+7. **Environment Safety**: Production fails safely if `JWT_SECRET` is unset.
 
 ---
 
-> 📝 **Document prepared for student project use.** All tools and platforms selected are within free tiers suitable for academic demonstration and portfolio projects.
+## 7. AI Integration Specifications
+
+- **Integration**: Google Gemini API via `@google/generative-ai`.
+- **Context Injection**: Live database state fetched dynamically per request based on user role.
+- **Safety**: Strict prompt guardrails preventing credentials, password leaks, or cross-tenant private data disclosures.
+- **Context Window Management**: Automatic conversation history truncation (last 6 messages).
+
+---
+
+## 8. Automated Testing & QA
+
+- Automated unit and security tests verifying Zod schemas, JWT validation, password hashing, role authorization, business logic, bed occupancy calculations, and heuristic classifications.
+- Build verification ensuring zero frontend bundle or syntax errors.

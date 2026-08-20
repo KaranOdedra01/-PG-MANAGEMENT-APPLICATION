@@ -1,88 +1,26 @@
-import mongoose from 'mongoose';
-import { inMemoryUsers } from '../utils/inMemoryStore.js';
+import { MessMenu, MealSubscription } from '../models/Mess.js';
+import User from '../models/User.js';
+import { logActivity } from '../utils/activityLogger.js';
 
-export let inMemoryWeeklyMenu = [
-  {
-    day: 'Monday',
-    breakfast: 'Poha, Boiled Eggs / Banana, Tea/Coffee',
-    lunch: 'Dal Makhani, Mix Veg, Roti, Jeera Rice, Curd',
-    snacks: 'Veg Sandwich & Ginger Chai',
-    dinner: 'Aloo Gobi, Chana Dal, Chapati, Steamed Rice, Gulab Jamun',
-    specialNote: 'Dessert Included'
-  },
-  {
-    day: 'Tuesday',
-    breakfast: 'Aloo Paratha with Curd & Pickle, Tea',
-    lunch: 'Rajma Masala, Aloo Shimla Mirch, Roti, Basmati Rice, Salad',
-    snacks: 'Samosa with Green & Tamarind Chutney',
-    dinner: 'Kadhai Paneer / Egg Curry, Tarka Dal, Roti, Rice',
-    specialNote: 'Special Paneer Day'
-  },
-  {
-    day: 'Wednesday',
-    breakfast: 'Idli Sambar & Coconut Chutney, Filter Coffee',
-    lunch: 'Chole Masala, Bhature / Puri, Jeera Rice, Boondi Raita',
-    snacks: 'White Sauce Pasta & Cold Coffee',
-    dinner: 'Soyabean Curry, Moong Dal, Roti, Rice, Kheer',
-    specialNote: 'South Indian Breakfast'
-  },
-  {
-    day: 'Thursday',
-    breakfast: 'Methi Thepla, Chhundo / Pickle, Masala Chai',
-    lunch: 'Kadhi Pakoda, Aloo Bhindi Fry, Steamed Rice, Roti',
-    snacks: 'Bhel Puri & Lemon Iced Tea',
-    dinner: 'Matar Paneer, Yellow Dal Tadka, Butter Roti, Pulao',
-    specialNote: 'Light Gujarati Lunch'
-  },
-  {
-    day: 'Friday',
-    breakfast: 'Bread Omelette / Veg Cheese Toast, Tea/Coffee',
-    lunch: 'Dal Fry, Sev Tameta Nu Shaak, Rice, Phulka Roti, Salad',
-    snacks: 'Vada Pav with Fried Green Chillies',
-    dinner: 'Veg Biryani / Chicken Biryani, Veg Raita, Salan, Ice Cream',
-    specialNote: 'Biryani Night'
-  },
-  {
-    day: 'Saturday',
-    breakfast: 'Masala Dosa with Sambhar & Red Chutney',
-    lunch: 'Baingan Bharta, Gujarati Dal, Steamed Rice, Roti, Buttermilk',
-    snacks: 'French Fries & Chai',
-    dinner: 'Pav Bhaji with Extra Butter Pav, Pulav, Sweet Lassi',
-    specialNote: 'Street Food Saturday'
-  },
-  {
-    day: 'Sunday',
-    breakfast: 'Poori Bhaji / Chana Poori, Halwa, Special Tea',
-    lunch: 'Dum Aloo Kashmiri, Dal Tadka, Ghee Rice, Roti, Roasted Papad',
-    snacks: 'Pakodas & Masala Chai',
-    dinner: 'Paneer Butter Masala, Butter Naan, Veg Pulao, Rasgulla',
-    specialNote: 'Sunday Feast'
-  }
-];
-
-export let inMemoryMealAttendance = {
-  breakfast: ['66c1a0010000000000000002', '66c1a0010000000000000004'],
-  lunch: ['66c1a0010000000000000002', '66c1a0010000000000000004', '66c1a0010000000000000005'],
-  dinner: ['66c1a0010000000000000002', '66c1a0010000000000000004', '66c1a0010000000000000005']
-};
-
-export let inMemoryTenantPlans = {
-  '66c1a0010000000000000002': { plan: 'full', monthlyCharge: 3500, diet: 'Vegetarian' },
-  '66c1a0010000000000000004': { plan: 'full', monthlyCharge: 3500, diet: 'Vegetarian' },
-  '66c1a0010000000000000005': { plan: '2-meal', monthlyCharge: 2800, diet: 'Eggetarian' }
-};
+// Default 7-day template if database is freshly seeded
+const defaultDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 // @desc    Get Weekly Mess Timetable
 // @route   GET /api/mess/menu
 // @access  Private
 export const getWeeklyMenu = async (req, res) => {
   try {
-    res.json({
+    let menu = await MessMenu.find();
+
+    // Sort in standard weekly order
+    menu.sort((a, b) => defaultDays.indexOf(a.day) - defaultDays.indexOf(b.day));
+
+    return res.json({
       success: true,
-      data: inMemoryWeeklyMenu
+      data: menu
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -93,49 +31,62 @@ export const updateWeeklyMenu = async (req, res) => {
   try {
     const { day, breakfast, lunch, snacks, dinner, specialNote } = req.body;
 
-    const index = inMemoryWeeklyMenu.findIndex(m => m.day.toLowerCase() === day.toLowerCase());
-    if (index === -1) {
-      return res.status(404).json({ success: false, message: 'Day not found' });
+    let menuItem = await MessMenu.findOne({ day });
+    if (!menuItem) {
+      menuItem = new MessMenu({ day });
     }
 
-    inMemoryWeeklyMenu[index] = {
-      ...inMemoryWeeklyMenu[index],
-      breakfast: breakfast || inMemoryWeeklyMenu[index].breakfast,
-      lunch: lunch || inMemoryWeeklyMenu[index].lunch,
-      snacks: snacks || inMemoryWeeklyMenu[index].snacks,
-      dinner: dinner || inMemoryWeeklyMenu[index].dinner,
-      specialNote: specialNote !== undefined ? specialNote : inMemoryWeeklyMenu[index].specialNote
-    };
+    if (breakfast) menuItem.breakfast = breakfast.trim();
+    if (lunch) menuItem.lunch = lunch.trim();
+    if (snacks) menuItem.snacks = snacks.trim();
+    if (dinner) menuItem.dinner = dinner.trim();
+    if (specialNote !== undefined) menuItem.specialNote = specialNote.trim();
 
-    res.json({
+    await menuItem.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_MESS_MENU',
+      entity: 'MessMenu',
+      entityId: menuItem._id,
+      description: `Updated mess menu for ${day}`
+    });
+
+    return res.json({
       success: true,
-      message: 'Mess menu for ' + day + ' updated successfully',
-      data: inMemoryWeeklyMenu[index]
+      message: `Mess menu for ${day} updated successfully`,
+      data: menuItem
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get Today's Live Meal Headcount & Active Subscription Stats
+// @desc    Get Today's Live Meal Headcount & Subscription Stats
 // @route   GET /api/mess/headcount
 // @access  Private
 export const getMealHeadcount = async (req, res) => {
   try {
-    const totalTenants = inMemoryUsers.filter(u => u.role === 'tenant').length;
-    res.json({
+    const totalTenants = await User.countDocuments({ role: 'tenant', isActive: true });
+    const subscriptions = await MealSubscription.find({ plan: { $ne: 'none' } });
+
+    const breakfastCount = subscriptions.filter(s => s.attendance?.breakfast).length;
+    const lunchCount = subscriptions.filter(s => s.attendance?.lunch).length;
+    const dinnerCount = subscriptions.filter(s => s.attendance?.dinner).length;
+
+    return res.json({
       success: true,
       data: {
-        totalSubscribedTenants: totalTenants,
+        totalSubscribedTenants: subscriptions.length || totalTenants,
         headcount: {
-          breakfast: inMemoryMealAttendance.breakfast.length,
-          lunch: inMemoryMealAttendance.lunch.length,
-          dinner: inMemoryMealAttendance.dinner.length
+          breakfast: breakfastCount,
+          lunch: lunchCount,
+          dinner: dinnerCount
         }
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -144,24 +95,32 @@ export const getMealHeadcount = async (req, res) => {
 // @access  Private (Tenant)
 export const getMySubscription = async (req, res) => {
   try {
-    const userId = req.user._id ? req.user._id.toString() : '66c1a0010000000000000002';
-    const sub = inMemoryTenantPlans[userId] || { plan: 'full', monthlyCharge: 3500, diet: 'Vegetarian' };
+    const userId = req.user._id;
 
-    const todayAttendance = {
-      breakfast: inMemoryMealAttendance.breakfast.includes(userId),
-      lunch: inMemoryMealAttendance.lunch.includes(userId),
-      dinner: inMemoryMealAttendance.dinner.includes(userId)
-    };
+    let sub = await MealSubscription.findOne({ userId });
+    if (!sub) {
+      sub = await MealSubscription.create({
+        userId,
+        plan: 'full',
+        monthlyCharge: 3500,
+        diet: 'Vegetarian',
+        attendance: { breakfast: true, lunch: true, dinner: true }
+      });
+    }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
-        subscription: sub,
-        todayAttendance
+        subscription: {
+          plan: sub.plan,
+          monthlyCharge: sub.monthlyCharge,
+          diet: sub.diet
+        },
+        todayAttendance: sub.attendance
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -171,34 +130,37 @@ export const getMySubscription = async (req, res) => {
 export const toggleMealAttendance = async (req, res) => {
   try {
     const { mealType } = req.body; // 'breakfast' | 'lunch' | 'dinner'
-    const userId = req.user._id ? req.user._id.toString() : '66c1a0010000000000000002';
+    const userId = req.user._id;
 
     if (!['breakfast', 'lunch', 'dinner'].includes(mealType)) {
       return res.status(400).json({ success: false, message: 'Invalid meal type' });
     }
 
-    let isAttending = false;
-    if (inMemoryMealAttendance[mealType].includes(userId)) {
-      // Remove (skipping meal)
-      inMemoryMealAttendance[mealType] = inMemoryMealAttendance[mealType].filter(id => id !== userId);
-      isAttending = false;
-    } else {
-      // Add (opting in)
-      inMemoryMealAttendance[mealType].push(userId);
-      isAttending = true;
+    let sub = await MealSubscription.findOne({ userId });
+    if (!sub) {
+      sub = new MealSubscription({
+        userId,
+        plan: 'full',
+        monthlyCharge: 3500,
+        diet: 'Vegetarian',
+        attendance: { breakfast: true, lunch: true, dinner: true }
+      });
     }
 
-    res.json({
+    const currentVal = sub.attendance[mealType];
+    sub.attendance[mealType] = !currentVal;
+    await sub.save();
+
+    return res.json({
       success: true,
-      message: isAttending ? 'Opted in for ' + mealType : 'Marked skipping ' + mealType,
+      message: sub.attendance[mealType] ? `Opted in for ${mealType}` : `Marked skipping ${mealType}`,
       data: {
         mealType,
-        isAttending,
-        currentHeadcount: inMemoryMealAttendance[mealType].length
+        isAttending: sub.attendance[mealType]
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -208,24 +170,39 @@ export const toggleMealAttendance = async (req, res) => {
 export const updateMealPlan = async (req, res) => {
   try {
     const { plan, diet } = req.body;
-    const userId = req.user._id ? req.user._id.toString() : '66c1a0010000000000000002';
+    const userId = req.user._id;
 
     let charge = 3500;
     if (plan === '2-meal') charge = 2800;
     if (plan === 'none') charge = 0;
 
-    inMemoryTenantPlans[userId] = {
-      plan: plan || 'full',
-      monthlyCharge: charge,
-      diet: diet || 'Vegetarian'
-    };
+    let sub = await MealSubscription.findOne({ userId });
+    if (!sub) {
+      sub = new MealSubscription({ userId });
+    }
 
-    res.json({
+    if (plan) {
+      sub.plan = plan;
+      sub.monthlyCharge = charge;
+    }
+    if (diet) sub.diet = diet;
+
+    await sub.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_MEAL_PLAN',
+      entity: 'MealSubscription',
+      entityId: sub._id,
+      description: `Updated meal plan to ${sub.plan} (${sub.diet})`
+    });
+
+    return res.json({
       success: true,
-      message: 'Meal subscription plan updated to ' + plan,
-      data: inMemoryTenantPlans[userId]
+      message: `Meal subscription plan updated to ${sub.plan}`,
+      data: sub
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

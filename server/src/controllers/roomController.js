@@ -1,49 +1,38 @@
-import mongoose from 'mongoose';
 import Room from '../models/Room.js';
-import { inMemoryRooms } from '../utils/inMemoryStore.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 // @desc    Get all rooms with search & filters
 // @route   GET /api/rooms
-// @access  Private (Admin, Staff, Tenant)
+// @access  Private
 export const getRooms = async (req, res) => {
   try {
     const { floor, status, type, search } = req.query;
-
-    if (mongoose.connection.readyState === 1) {
-      let query = {};
-      if (floor) query.floor = Number(floor);
-      if (status && status !== 'all') query.status = status;
-      if (type && type !== 'all') query.type = type;
-      if (search) {
-        query.roomNumber = { $regex: search, $options: 'i' };
-      }
-      const rooms = await Room.find(query).sort({ roomNumber: 1 });
-      return res.json({ success: true, count: rooms.length, data: rooms });
-    }
-
-    // In-memory filter
-    let results = [...inMemoryRooms];
+    const query = {};
 
     if (floor) {
-      results = results.filter(r => r.floor === Number(floor));
+      query.floor = Number(floor);
     }
     if (status && status !== 'all') {
-      results = results.filter(r => r.status === status);
+      query.status = status;
     }
     if (type && type !== 'all') {
-      results = results.filter(r => r.type === type);
+      query.type = type;
     }
     if (search) {
-      results = results.filter(r => r.roomNumber.toLowerCase().includes(search.toLowerCase()));
+      query.roomNumber = { $regex: search.trim(), $options: 'i' };
     }
 
-    res.json({
+    const rooms = await Room.find(query)
+      .populate('tenants', 'name email phone avatar')
+      .sort({ floor: 1, roomNumber: 1 });
+
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: rooms.length,
+      data: rooms
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -53,18 +42,18 @@ export const getRooms = async (req, res) => {
 export const getRoomById = async (req, res) => {
   try {
     const { id } = req.params;
+    const room = await Room.findById(id).populate('tenants', 'name email phone avatar');
 
-    if (mongoose.connection.readyState === 1) {
-      const room = await Room.findById(id);
-      if (!room) return res.status(404).json({ success: false, message: 'Room not found' });
-      return res.json({ success: true, data: room });
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Room not found' });
     }
 
-    const room = inMemoryRooms.find(r => r._id.toString() === id.toString());
-    if (!room) return res.status(404).json({ success: false, message: 'Room not found' });
-    res.json({ success: true, data: room });
+    return res.json({
+      success: true,
+      data: room
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -74,58 +63,56 @@ export const getRoomById = async (req, res) => {
 export const createRoom = async (req, res) => {
   try {
     const { roomNumber, floor, type, capacity, rent, amenities = [] } = req.body;
+    const normalizedRoomNumber = roomNumber.trim().toUpperCase();
 
-    if (!roomNumber || !floor || !type || !capacity || !rent) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide roomNumber, floor, type, capacity, and rent'
-      });
-    }
-
-    if (mongoose.connection.readyState === 1) {
-      const exists = await Room.findOne({ roomNumber });
-      if (exists) {
-        return res.status(400).json({ success: false, message: `Room number ${roomNumber} already exists` });
-      }
-
-      const room = await Room.create({
-        roomNumber,
-        floor: Number(floor),
-        type,
-        capacity: Number(capacity),
-        occupiedBeds: 0,
-        rent: Number(rent),
-        status: 'available',
-        amenities,
-        tenants: []
-      });
-
-      return res.status(201).json({ success: true, message: 'Room created successfully', data: room });
-    }
-
-    // In-memory create
-    const exists = inMemoryRooms.find(r => r.roomNumber.toLowerCase() === roomNumber.toString().toLowerCase());
+    const exists = await Room.findOne({ roomNumber: normalizedRoomNumber });
     if (exists) {
-      return res.status(400).json({ success: false, message: `Room number ${roomNumber} already exists` });
+      return res.status(400).json({ 
+        success: false, 
+        message: `Room number ${normalizedRoomNumber} already exists` 
+      });
     }
 
-    const newRoom = {
-      _id: `room_${Date.now()}`,
-      roomNumber: roomNumber.toString(),
+    // Initialize bed slots based on capacity
+    const beds = [];
+    const capacityNum = Number(capacity);
+    for (let i = 1; i <= capacityNum; i++) {
+      const char = String.fromCharCode(64 + i); // 'A', 'B', 'C'...
+      beds.push({
+        bedNumber: `Bed ${char}`,
+        isOccupied: false,
+        tenantId: null
+      });
+    }
+
+    const room = await Room.create({
+      roomNumber: normalizedRoomNumber,
       floor: Number(floor),
       type,
-      capacity: Number(capacity),
+      capacity: capacityNum,
       occupiedBeds: 0,
       rent: Number(rent),
       status: 'available',
       amenities: Array.isArray(amenities) ? amenities : [],
+      beds,
       tenants: []
-    };
+    });
 
-    inMemoryRooms.push(newRoom);
-    res.status(201).json({ success: true, message: 'Room created successfully', data: newRoom });
+    await logActivity({
+      user: req.user,
+      action: 'CREATE_ROOM',
+      entity: 'Room',
+      entityId: room._id,
+      description: `Created Room ${room.roomNumber} (${room.type}, capacity: ${room.capacity}, rent: ₹${room.rent})`
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `Room ${room.roomNumber} created successfully`,
+      data: room
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -137,42 +124,56 @@ export const updateRoom = async (req, res) => {
     const { id } = req.params;
     const { roomNumber, floor, type, capacity, rent, status, amenities } = req.body;
 
-    if (mongoose.connection.readyState === 1) {
-      const room = await Room.findById(id);
-      if (!room) return res.status(404).json({ success: false, message: 'Room not found' });
-
-      if (roomNumber) room.roomNumber = roomNumber;
-      if (floor) room.floor = Number(floor);
-      if (type) room.type = type;
-      if (capacity) room.capacity = Number(capacity);
-      if (rent) room.rent = Number(rent);
-      if (status) room.status = status;
-      if (amenities) room.amenities = amenities;
-
-      await room.save();
-      return res.json({ success: true, message: 'Room updated successfully', data: room });
-    }
-
-    const index = inMemoryRooms.findIndex(r => r._id.toString() === id.toString());
-    if (index === -1) {
+    const room = await Room.findById(id);
+    if (!room) {
       return res.status(404).json({ success: false, message: 'Room not found' });
     }
 
-    const target = inMemoryRooms[index];
-    inMemoryRooms[index] = {
-      ...target,
-      roomNumber: roomNumber !== undefined ? roomNumber.toString() : target.roomNumber,
-      floor: floor !== undefined ? Number(floor) : target.floor,
-      type: type || target.type,
-      capacity: capacity !== undefined ? Number(capacity) : target.capacity,
-      rent: rent !== undefined ? Number(rent) : target.rent,
-      status: status || target.status,
-      amenities: amenities || target.amenities
-    };
+    if (roomNumber && roomNumber.trim().toUpperCase() !== room.roomNumber) {
+      const exists = await Room.findOne({ roomNumber: roomNumber.trim().toUpperCase() });
+      if (exists) {
+        return res.status(400).json({ 
+          success: false, 
+          message: `Room number ${roomNumber} is already in use` 
+        });
+      }
+      room.roomNumber = roomNumber.trim().toUpperCase();
+    }
 
-    res.json({ success: true, message: 'Room updated successfully', data: inMemoryRooms[index] });
+    if (floor !== undefined) room.floor = Number(floor);
+    if (type) room.type = type;
+    if (rent !== undefined) room.rent = Number(rent);
+    if (status) room.status = status;
+    if (amenities) room.amenities = Array.isArray(amenities) ? amenities : [];
+
+    if (capacity !== undefined) {
+      const newCapacity = Number(capacity);
+      if (newCapacity < room.occupiedBeds) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot reduce capacity to ${newCapacity} because ${room.occupiedBeds} beds are currently occupied.`
+        });
+      }
+      room.capacity = newCapacity;
+    }
+
+    await room.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_ROOM',
+      entity: 'Room',
+      entityId: room._id,
+      description: `Updated details for Room ${room.roomNumber}`
+    });
+
+    return res.json({
+      success: true,
+      message: `Room ${room.roomNumber} updated successfully`,
+      data: room
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -184,17 +185,36 @@ export const toggleRoomStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!['available', 'occupied', 'maintenance'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status value' });
+    const room = await Room.findById(id);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Room not found' });
     }
 
-    const room = inMemoryRooms.find(r => r._id.toString() === id.toString());
-    if (!room) return res.status(404).json({ success: false, message: 'Room not found' });
+    if (status === 'maintenance' && room.occupiedBeds > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot put room under maintenance while tenants are occupied. Please reallocate tenants first.'
+      });
+    }
 
     room.status = status;
-    res.json({ success: true, message: `Room status updated to ${status}`, data: room });
+    await room.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'TOGGLE_ROOM_STATUS',
+      entity: 'Room',
+      entityId: room._id,
+      description: `Changed Room ${room.roomNumber} status to ${status}`
+    });
+
+    return res.json({
+      success: true,
+      message: `Room ${room.roomNumber} status set to ${status}`,
+      data: room
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -204,36 +224,34 @@ export const toggleRoomStatus = async (req, res) => {
 export const deleteRoom = async (req, res) => {
   try {
     const { id } = req.params;
+    const room = await Room.findById(id);
 
-    if (mongoose.connection.readyState === 1) {
-      const room = await Room.findById(id);
-      if (!room) return res.status(404).json({ success: false, message: 'Room not found' });
-      if (room.occupiedBeds > 0 || room.tenants?.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot delete an occupied room! Please reallocate tenants first.'
-        });
-      }
-      await room.deleteOne();
-      return res.json({ success: true, message: 'Room deleted successfully' });
-    }
-
-    const index = inMemoryRooms.findIndex(r => r._id.toString() === id.toString());
-    if (index === -1) {
+    if (!room) {
       return res.status(404).json({ success: false, message: 'Room not found' });
     }
 
-    const room = inMemoryRooms[index];
-    if (room.occupiedBeds > 0 || room.tenants?.length > 0) {
+    if (room.occupiedBeds > 0 || (room.tenants && room.tenants.length > 0)) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete an occupied room! Please reallocate tenants first.'
+        message: 'Cannot delete an occupied room! Please checkout or reallocate tenants first.'
       });
     }
 
-    inMemoryRooms.splice(index, 1);
-    res.json({ success: true, message: 'Room deleted successfully' });
+    await room.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_ROOM',
+      entity: 'Room',
+      entityId: id,
+      description: `Deleted Room ${room.roomNumber}`
+    });
+
+    return res.json({
+      success: true,
+      message: `Room ${room.roomNumber} deleted successfully`
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

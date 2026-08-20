@@ -3,104 +3,93 @@ import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Room from '../models/Room.js';
 import Tenant from '../models/Tenant.js';
-import { inMemoryUsers, inMemoryRooms } from '../utils/inMemoryStore.js';
+import Notification from '../models/Notification.js';
+import { logActivity } from '../utils/activityLogger.js';
 
-export let inMemoryTenants = [
-  {
-    _id: '66c1t0010000000000000001',
-    userId: '66c1a0010000000000000002',
-    roomId: '66c1b0010000000000000002',
-    roomNumber: '102',
-    name: 'Rahul Sharma',
-    email: 'tenant@pg.com',
-    phone: '+91 98111 22233',
-    checkInDate: new Date('2026-02-10'),
-    checkOutDate: null,
-    securityDeposit: 15000,
-    monthlyRent: 7500,
-    idProofType: 'Aadhaar',
-    idProofNumber: 'XXXX-XXXX-4812',
-    emergencyContact: { name: 'Sunil Sharma', phone: '+91 98111 99999', relation: 'Father' },
-    status: 'active'
-  },
-  {
-    _id: '66c1t0010000000000000002',
-    userId: '66c1a0010000000000000004',
-    roomId: '66c1b0010000000000000001',
-    roomNumber: '101',
-    name: 'Priya Patel',
-    email: 'priya@gmail.com',
-    phone: '+91 98222 33445',
-    checkInDate: new Date('2026-03-01'),
-    checkOutDate: null,
-    securityDeposit: 19000,
-    monthlyRent: 9500,
-    idProofType: 'College ID',
-    idProofNumber: 'GUJ-2024-889',
-    emergencyContact: { name: 'Dinesh Patel', phone: '+91 98222 88888', relation: 'Father' },
-    status: 'active'
-  },
-  {
-    _id: '66c1t0010000000000000003',
-    userId: '66c1a0010000000000000005',
-    roomId: '66c1b0010000000000000002',
-    roomNumber: '102',
-    name: 'Aman Verma',
-    email: 'aman@gmail.com',
-    phone: '+91 98444 55667',
-    checkInDate: new Date('2026-04-12'),
-    checkOutDate: null,
-    securityDeposit: 15000,
-    monthlyRent: 7500,
-    idProofType: 'Aadhaar',
-    idProofNumber: 'XXXX-XXXX-9921',
-    emergencyContact: { name: 'Sanjay Verma', phone: '+91 98444 99999', relation: 'Brother' },
-    status: 'active'
-  }
-];
-
+// @desc    Get all tenants with search & filters
+// @route   GET /api/tenants
+// @access  Private (Admin & Staff)
 export const getTenants = async (req, res) => {
   try {
     const { status, roomNumber, search } = req.query;
-    let results = [...inMemoryTenants];
+    const query = {};
 
     if (status && status !== 'all') {
-      results = results.filter(t => t.status === status);
+      query.status = status;
     }
     if (roomNumber && roomNumber !== 'all') {
-      results = results.filter(t => t.roomNumber === roomNumber);
+      query.roomNumber = roomNumber.trim();
     }
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(t => 
-        t.name.toLowerCase().includes(q) || 
-        t.email.toLowerCase().includes(q) || 
-        t.phone.includes(q) ||
-        t.roomNumber.includes(q)
-      );
+      const q = search.trim();
+      query.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+        { phone: { $regex: q, $options: 'i' } },
+        { roomNumber: { $regex: q, $options: 'i' } }
+      ];
     }
 
-    res.json({
+    const tenants = await Tenant.find(query)
+      .populate('roomId', 'roomNumber floor type rent status')
+      .populate('userId', 'name email phone avatar isActive')
+      .sort({ createdAt: -1 });
+
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: tenants.length,
+      data: tenants
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Get single tenant by ID (with IDOR protection)
+// @route   GET /api/tenants/:id
+// @access  Private
 export const getTenantById = async (req, res) => {
   try {
     const { id } = req.params;
-    const tenant = inMemoryTenants.find(t => t._id.toString() === id.toString());
-    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
-    res.json({ success: true, data: tenant });
+    let tenant;
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      tenant = await Tenant.findById(id)
+        .populate('roomId', 'roomNumber floor type rent amenities')
+        .populate('userId', 'name email phone avatar');
+    }
+
+    if (!tenant) {
+      // Fallback search by userId
+      tenant = await Tenant.findOne({ userId: id })
+        .populate('roomId', 'roomNumber floor type rent amenities')
+        .populate('userId', 'name email phone avatar');
+    }
+
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant record not found' });
+    }
+
+    // IDOR Protection: Tenant can only view their own record
+    if (req.user.role === 'tenant' && tenant.userId?._id?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You can only view your own tenant profile'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: tenant
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Onboard a new tenant to a room
+// @route   POST /api/tenants/onboard
+// @access  Private (Admin & Staff)
 export const onboardTenant = async (req, res) => {
   try {
     const { 
@@ -112,118 +101,180 @@ export const onboardTenant = async (req, res) => {
       securityDeposit = 10000, 
       idProofType = 'Aadhaar',
       idProofNumber = '',
+      checkInDate,
       emergencyContact 
     } = req.body;
 
-    if (!name || !email || !phone || !roomId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide name, email, phone, and target roomId'
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // 1. Verify Target Room
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Target room not found' });
+    }
+
+    if (room.status === 'maintenance') {
+      return res.status(400).json({ success: false, message: `Room ${room.roomNumber} is currently under maintenance.` });
+    }
+
+    if (room.occupiedBeds >= room.capacity) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Room ${room.roomNumber} is already at full capacity (${room.capacity}/${room.capacity} beds occupied)` 
       });
     }
 
-    const room = inMemoryRooms.find(r => r._id.toString() === roomId.toString());
-    if (!room) {
-      return res.status(404).json({ success: false, message: 'Selected room not found' });
+    // 2. Find or Create User Account
+    let user = await User.findOne({ email: normalizedEmail });
+    if (user) {
+      // Check if user is already an active tenant
+      const activeTenant = await Tenant.findOne({ userId: user._id, status: 'active' });
+      if (activeTenant) {
+        return res.status(400).json({
+          success: false,
+          message: `User with email ${normalizedEmail} is already active in Room #${activeTenant.roomNumber}`
+        });
+      }
+      user.roomId = room._id;
+      user.roomNumber = room.roomNumber;
+      user.phone = phone || user.phone;
+      if (emergencyContact) user.emergencyContact = emergencyContact;
+      await user.save();
+    } else {
+      user = await User.create({
+        name: name.trim(),
+        email: normalizedEmail,
+        password,
+        role: 'tenant',
+        phone: phone.trim(),
+        roomId: room._id,
+        roomNumber: room.roomNumber,
+        emergencyContact: emergencyContact || { name: '', phone: '', relation: '' }
+      });
     }
 
-    if (room.occupiedBeds >= room.capacity) {
-      return res.status(400).json({ success: false, message: 'Selected room is already fully occupied!' });
+    // 3. Find available bed in room
+    let assignedBed = 'Bed A';
+    if (room.beds && room.beds.length > 0) {
+      const freeBed = room.beds.find(b => !b.isOccupied);
+      if (freeBed) {
+        freeBed.isOccupied = true;
+        freeBed.tenantId = user._id;
+        assignedBed = freeBed.bedNumber;
+      }
     }
 
-    const userExists = inMemoryUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (userExists) {
-      return res.status(400).json({ success: false, message: 'A user with this email is already registered' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const userId = 'usr_' + Date.now();
-    const newUser = {
-      _id: userId,
-      name,
-      email: email.toLowerCase(),
-      password: hashedPassword,
-      role: 'tenant',
-      phone,
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + encodeURIComponent(name),
+    // 4. Create Tenant Document
+    const newTenant = await Tenant.create({
+      userId: user._id,
       roomId: room._id,
       roomNumber: room.roomNumber,
-      isActive: true,
-      emergencyContact: emergencyContact || { name: '', phone: '', relation: '' },
-      createdAt: new Date()
-    };
-    inMemoryUsers.push(newUser);
-
-    const newTenant = {
-      _id: 'tnt_' + Date.now(),
-      userId,
-      roomId: room._id,
-      roomNumber: room.roomNumber,
-      name,
-      email: email.toLowerCase(),
-      phone,
-      checkInDate: new Date(),
+      bedNumber: assignedBed,
+      name: name.trim(),
+      email: normalizedEmail,
+      phone: phone.trim(),
+      checkInDate: checkInDate ? new Date(checkInDate) : new Date(),
       checkOutDate: null,
       securityDeposit: Number(securityDeposit),
-      monthlyRent: room.rent,
+      monthlyRent: Number(room.rent),
       idProofType,
-      idProofNumber,
+      idProofNumber: idProofNumber || '',
       emergencyContact: emergencyContact || { name: 'Guardian', phone: phone, relation: 'Parent' },
       status: 'active'
-    };
-    inMemoryTenants.unshift(newTenant);
+    });
 
-    room.occupiedBeds += 1;
+    // 5. Update Room occupancy
+    room.occupiedBeds = (room.occupiedBeds || 0) + 1;
+    if (!room.tenants) room.tenants = [];
+    if (!room.tenants.includes(user._id)) {
+      room.tenants.push(user._id);
+    }
     if (room.occupiedBeds >= room.capacity) {
       room.status = 'occupied';
     }
-    if (!room.tenants) room.tenants = [];
-    room.tenants.push(userId);
+    await room.save();
 
-    res.status(201).json({
+    // 6. Create in-app Notification
+    await Notification.create({
+      recipient: user._id,
+      type: 'room',
+      title: 'Welcome to your PG accommodation!',
+      message: `You have been assigned to Room #${room.roomNumber} (${assignedBed}). Monthly rent: ₹${room.rent}.`,
+      link: '/dashboard'
+    });
+
+    // 7. Log Activity
+    await logActivity({
+      user: req.user,
+      action: 'ONBOARD_TENANT',
+      entity: 'Tenant',
+      entityId: newTenant._id,
+      description: `Onboarded tenant ${newTenant.name} into Room ${room.roomNumber} (${assignedBed})`
+    });
+
+    return res.status(201).json({
       success: true,
-      message: 'Tenant ' + name + ' onboarded successfully to Room #' + room.roomNumber,
+      message: `Tenant ${name} onboarded successfully to Room #${room.roomNumber} (${assignedBed})`,
       data: newTenant
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Update tenant details
+// @route   PUT /api/tenants/:id
+// @access  Private (Admin & Staff)
 export const updateTenant = async (req, res) => {
   try {
     const { id } = req.params;
-    const { phone, securityDeposit, emergencyContact, idProofType, idProofNumber } = req.body;
+    const { phone, securityDeposit, emergencyContact, idProofType, idProofNumber, status } = req.body;
 
-    const index = inMemoryTenants.findIndex(t => t._id.toString() === id.toString());
-    if (index === -1) {
+    const tenant = await Tenant.findById(id);
+    if (!tenant) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const current = inMemoryTenants[index];
-    inMemoryTenants[index] = {
-      ...current,
-      phone: phone || current.phone,
-      securityDeposit: securityDeposit !== undefined ? Number(securityDeposit) : current.securityDeposit,
-      emergencyContact: emergencyContact || current.emergencyContact,
-      idProofType: idProofType || current.idProofType,
-      idProofNumber: idProofNumber !== undefined ? idProofNumber : current.idProofNumber
-    };
+    if (phone) tenant.phone = phone.trim();
+    if (securityDeposit !== undefined) tenant.securityDeposit = Number(securityDeposit);
+    if (emergencyContact) tenant.emergencyContact = emergencyContact;
+    if (idProofType) tenant.idProofType = idProofType;
+    if (idProofNumber !== undefined) tenant.idProofNumber = idProofNumber.trim();
+    if (status) tenant.status = status;
 
-    res.json({
+    await tenant.save();
+
+    // Sync phone with User
+    if (phone && tenant.userId) {
+      await User.findByIdAndUpdate(tenant.userId, { phone: phone.trim() });
+    }
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_TENANT',
+      entity: 'Tenant',
+      entityId: tenant._id,
+      description: `Updated profile details for tenant ${tenant.name}`
+    });
+
+    return res.json({
       success: true,
       message: 'Tenant details updated successfully',
-      data: inMemoryTenants[index]
+      data: tenant
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Check-out tenant and free room bed
+// @route   POST /api/tenants/:id/checkout
+// @access  Private (Admin & Staff)
 export const checkoutTenant = async (req, res) => {
   try {
     const { id } = req.params;
-    const tenant = inMemoryTenants.find(t => t._id.toString() === id.toString());
+    const tenant = await Tenant.findById(id);
+
     if (!tenant) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
@@ -234,38 +285,91 @@ export const checkoutTenant = async (req, res) => {
 
     tenant.status = 'checked-out';
     tenant.checkOutDate = new Date();
+    await tenant.save();
 
-    const room = inMemoryRooms.find(r => r._id.toString() === tenant.roomId.toString() || r.roomNumber === tenant.roomNumber);
+    // Free Room bed
+    const room = await Room.findById(tenant.roomId);
     if (room) {
-      room.occupiedBeds = Math.max(0, room.occupiedBeds - 1);
+      room.occupiedBeds = Math.max(0, (room.occupiedBeds || 1) - 1);
       if (room.status === 'occupied' && room.occupiedBeds < room.capacity) {
         room.status = 'available';
       }
       if (room.tenants) {
         room.tenants = room.tenants.filter(tid => tid.toString() !== tenant.userId.toString());
       }
+      if (room.beds) {
+        const tenantBed = room.beds.find(b => b.tenantId && b.tenantId.toString() === tenant.userId.toString());
+        if (tenantBed) {
+          tenantBed.isOccupied = false;
+          tenantBed.tenantId = null;
+        }
+      }
+      await room.save();
     }
 
-    res.json({
+    // Update User room association
+    await User.findByIdAndUpdate(tenant.userId, {
+      roomId: null,
+      roomNumber: ''
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'CHECKOUT_TENANT',
+      entity: 'Tenant',
+      entityId: tenant._id,
+      description: `Checked out tenant ${tenant.name} from Room #${tenant.roomNumber}`
+    });
+
+    return res.json({
       success: true,
-      message: 'Tenant ' + tenant.name + ' checked out successfully. Room #' + tenant.roomNumber + ' bed slot is now available.',
+      message: `Tenant ${tenant.name} checked out successfully. Room #${tenant.roomNumber} bed slot is now available.`,
       data: tenant
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Delete tenant record
+// @route   DELETE /api/tenants/:id
+// @access  Private (Admin Only)
 export const deleteTenant = async (req, res) => {
   try {
     const { id } = req.params;
-    const index = inMemoryTenants.findIndex(t => t._id.toString() === id.toString());
-    if (index === -1) {
+    const tenant = await Tenant.findById(id);
+
+    if (!tenant) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
-    inMemoryTenants.splice(index, 1);
-    res.json({ success: true, message: 'Tenant record removed' });
+
+    // If active, free room bed before deleting
+    if (tenant.status === 'active') {
+      const room = await Room.findById(tenant.roomId);
+      if (room) {
+        room.occupiedBeds = Math.max(0, (room.occupiedBeds || 1) - 1);
+        if (room.tenants) {
+          room.tenants = room.tenants.filter(tid => tid.toString() !== tenant.userId.toString());
+        }
+        await room.save();
+      }
+    }
+
+    await tenant.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_TENANT',
+      entity: 'Tenant',
+      entityId: id,
+      description: `Deleted tenant record for ${tenant.name}`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Tenant record removed successfully'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

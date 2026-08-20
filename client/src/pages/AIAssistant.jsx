@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
@@ -83,7 +83,16 @@ export const AIAssistant = () => {
     setChatLoading(true);
 
     try {
-      const res = await api.post('/ai/chat', { message: textToSend });
+      const history = messages.slice(-6).map(m => ({
+        role: m.sender === 'user' ? 'user' : 'model',
+        content: m.text
+      }));
+
+      const res = await api.post('/ai/chat', { 
+        message: textToSend,
+        conversationHistory: history 
+      });
+
       if (res.data?.success) {
         setMessages(prev => [
           ...prev,
@@ -100,7 +109,7 @@ export const AIAssistant = () => {
         ...prev,
         {
           sender: 'ai',
-          text: '⚠️ Unable to connect to assistant service. Please check network.',
+          text: err.response?.data?.message || '⚠️ Unable to connect to assistant service. Please check network.',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);

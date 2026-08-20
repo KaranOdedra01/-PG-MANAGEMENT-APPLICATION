@@ -1,53 +1,6 @@
-import mongoose from 'mongoose';
 import Visitor from '../models/Visitor.js';
-
-export let inMemoryVisitors = [
-  {
-    _id: 'vis_001',
-    name: 'Sunil Sharma',
-    phone: '+91 98111 99999',
-    visitorType: 'Family',
-    tenantName: 'Rahul Sharma',
-    roomNumber: '102',
-    purpose: 'Parents visiting for the weekend',
-    vehicleNumber: 'GJ-01-AB-1234',
-    entryTime: new Date(Date.now() - 3 * 60 * 60 * 1000),
-    exitTime: null,
-    status: 'inside',
-    isLateNight: false,
-    loggedBy: 'Ramesh Caretaker'
-  },
-  {
-    _id: 'vis_002',
-    name: 'Zomato Delivery Agent',
-    phone: '+91 98777 44433',
-    visitorType: 'Delivery',
-    tenantName: 'Priya Patel',
-    roomNumber: '101',
-    purpose: 'Food delivery parcel handover at gate',
-    vehicleNumber: 'GJ-01-XX-9900',
-    entryTime: new Date(Date.now() - 45 * 60 * 1000),
-    exitTime: new Date(Date.now() - 35 * 60 * 1000),
-    status: 'checked-out',
-    isLateNight: false,
-    loggedBy: 'Ramesh Caretaker'
-  },
-  {
-    _id: 'vis_003',
-    name: 'Vikram Mehta',
-    phone: '+91 98333 11223',
-    visitorType: 'Friend',
-    tenantName: 'Aman Verma',
-    roomNumber: '102',
-    purpose: 'College project study group',
-    vehicleNumber: '',
-    entryTime: new Date(Date.now() - 90 * 60 * 1000),
-    exitTime: null,
-    status: 'inside',
-    isLateNight: false,
-    loggedBy: 'Security Guard'
-  }
-];
+import User from '../models/User.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 // @desc    Get all visitor logs
 // @route   GET /api/visitors
@@ -55,33 +8,34 @@ export let inMemoryVisitors = [
 export const getVisitors = async (req, res) => {
   try {
     const { status, type, search } = req.query;
-    let results = [...inMemoryVisitors];
+    const query = {};
 
     if (status && status !== 'all') {
-      results = results.filter(v => v.status === status);
+      query.status = status;
     }
     if (type && type !== 'all') {
-      results = results.filter(v => v.visitorType.toLowerCase() === type.toLowerCase());
+      query.visitorType = { $regex: new RegExp(`^${type.trim()}$`, 'i') };
     }
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(v => 
-        v.name.toLowerCase().includes(q) || 
-        v.phone.includes(q) || 
-        v.tenantName.toLowerCase().includes(q) ||
-        v.roomNumber.includes(q)
-      );
+      const q = search.trim();
+      query.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { phone: { $regex: q, $options: 'i' } },
+        { tenantName: { $regex: q, $options: 'i' } },
+        { roomNumber: { $regex: q, $options: 'i' } },
+        { vehicleNumber: { $regex: q, $options: 'i' } }
+      ];
     }
 
-    results.sort((a, b) => new Date(b.entryTime) - new Date(a.entryTime));
+    const visitors = await Visitor.find(query).sort({ entryTime: -1 });
 
-    res.json({
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: visitors.length,
+      data: visitors
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -90,10 +44,10 @@ export const getVisitors = async (req, res) => {
 // @access  Private
 export const getActiveVisitors = async (req, res) => {
   try {
-    const inside = inMemoryVisitors.filter(v => v.status === 'inside');
-    const lateNight = inMemoryVisitors.filter(v => v.isLateNight && v.status === 'inside');
+    const inside = await Visitor.find({ status: 'inside' }).sort({ entryTime: -1 });
+    const lateNight = inside.filter(v => v.isLateNight);
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         totalCurrentlyInside: inside.length,
@@ -102,7 +56,7 @@ export const getActiveVisitors = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -113,38 +67,51 @@ export const checkinVisitor = async (req, res) => {
   try {
     const { name, phone, visitorType = 'Friend', tenantName, roomNumber, purpose = 'Visit', vehicleNumber = '' } = req.body;
 
-    if (!name || !phone || !roomNumber) {
-      return res.status(400).json({ success: false, message: 'Please provide visitor name, phone, and roomNumber' });
-    }
-
     const currentHour = new Date().getHours();
     const isLate = currentHour >= 21 || currentHour < 6; // 9:00 PM to 6:00 AM
 
-    const newVisitor = {
-      _id: 'vis_' + Date.now(),
-      name,
-      phone,
+    // Find host tenant if available
+    let hostTenantId = null;
+    let hostName = tenantName;
+    if (roomNumber) {
+      const hostUser = await User.findOne({ roomNumber: roomNumber.trim(), role: 'tenant' });
+      if (hostUser) {
+        hostTenantId = hostUser._id;
+        if (!hostName) hostName = hostUser.name;
+      }
+    }
+
+    const visitor = await Visitor.create({
+      name: name.trim(),
+      phone: phone.trim(),
       visitorType,
-      tenantName: tenantName || ('Resident of Room #' + roomNumber),
-      roomNumber,
-      purpose,
-      vehicleNumber,
+      tenantId: hostTenantId,
+      tenantName: hostName || `Resident of Room #${roomNumber}`,
+      roomNumber: roomNumber.trim(),
+      purpose: purpose.trim(),
+      vehicleNumber: vehicleNumber ? vehicleNumber.trim() : '',
       entryTime: new Date(),
       exitTime: null,
       status: 'inside',
       isLateNight: isLate,
-      loggedBy: req.user?.name || 'Gatekeeper'
-    };
+      loggedBy: req.user?.name || 'Security Guard'
+    });
 
-    inMemoryVisitors.unshift(newVisitor);
+    await logActivity({
+      user: req.user,
+      action: 'CHECKIN_VISITOR',
+      entity: 'Visitor',
+      entityId: visitor._id,
+      description: `Visitor ${visitor.name} checked in to visit Room #${visitor.roomNumber}`
+    });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: 'Visitor ' + name + ' checked in successfully to Room #' + roomNumber,
-      data: newVisitor
+      message: `Visitor ${visitor.name} checked in successfully to Room #${roomNumber}`,
+      data: visitor
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -154,7 +121,8 @@ export const checkinVisitor = async (req, res) => {
 export const checkoutVisitor = async (req, res) => {
   try {
     const { id } = req.params;
-    const visitor = inMemoryVisitors.find(v => v._id.toString() === id.toString());
+    const visitor = await Visitor.findById(id);
+
     if (!visitor) {
       return res.status(404).json({ success: false, message: 'Visitor entry not found' });
     }
@@ -165,14 +133,23 @@ export const checkoutVisitor = async (req, res) => {
 
     visitor.status = 'checked-out';
     visitor.exitTime = new Date();
+    await visitor.save();
 
-    res.json({
+    await logActivity({
+      user: req.user,
+      action: 'CHECKOUT_VISITOR',
+      entity: 'Visitor',
+      entityId: visitor._id,
+      description: `Visitor ${visitor.name} checked out`
+    });
+
+    return res.json({
       success: true,
-      message: 'Visitor ' + visitor.name + ' checked out successfully',
+      message: `Visitor ${visitor.name} checked out successfully`,
       data: visitor
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -182,14 +159,27 @@ export const checkoutVisitor = async (req, res) => {
 export const deleteVisitor = async (req, res) => {
   try {
     const { id } = req.params;
-    const index = inMemoryVisitors.findIndex(v => v._id.toString() === id.toString());
-    if (index === -1) {
+    const visitor = await Visitor.findById(id);
+
+    if (!visitor) {
       return res.status(404).json({ success: false, message: 'Visitor not found' });
     }
 
-    inMemoryVisitors.splice(index, 1);
-    res.json({ success: true, message: 'Visitor log deleted' });
+    await visitor.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_VISITOR',
+      entity: 'Visitor',
+      entityId: id,
+      description: `Deleted visitor log for ${visitor.name}`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Visitor log deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

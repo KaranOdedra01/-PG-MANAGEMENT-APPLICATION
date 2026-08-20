@@ -1,59 +1,70 @@
-import { inMemoryRooms, inMemoryUsers, inMemoryInvoices, inMemoryExpenses, inMemoryComplaints, inMemoryNotices } from '../utils/inMemoryStore.js';
-import { inMemoryVisitors } from './visitorController.js';
-import { inMemoryTenants } from './tenantController.js';
+import Room from '../models/Room.js';
+import Invoice from '../models/Invoice.js';
+import Expense from '../models/Expense.js';
+import Complaint from '../models/Complaint.js';
+import Tenant from '../models/Tenant.js';
+import Visitor from '../models/Visitor.js';
 
-// @desc    Get Consolidated Executive Summary
+// @desc    Get Consolidated Executive Summary (Pure MongoDB Aggregations)
 // @route   GET /api/reports/summary
 // @access  Private (Admin Only)
 export const getExecutiveSummary = async (req, res) => {
   try {
-    const totalBeds = inMemoryRooms.reduce((sum, r) => sum + r.capacity, 0);
-    const occupiedBeds = inMemoryRooms.reduce((sum, r) => sum + (r.occupiedBeds || 0), 0);
-    const occupancyRate = totalBeds > 0 ? ((occupiedBeds / totalBeds) * 100).toFixed(1) : 0;
+    const rooms = await Room.find();
+    const totalBeds = rooms.reduce((sum, r) => sum + (r.capacity || 0), 0);
+    const occupiedBeds = rooms.reduce((sum, r) => sum + (r.occupiedBeds || 0), 0);
+    const occupancyRate = totalBeds > 0 ? Number(((occupiedBeds / totalBeds) * 100).toFixed(1)) : 0;
 
-    const totalRevenue = inMemoryInvoices
+    const invoices = await Invoice.find();
+    const totalRevenue = invoices
       .filter(i => i.status === 'paid')
       .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
 
-    const pendingDues = inMemoryInvoices
+    const pendingDues = invoices
       .filter(i => i.status !== 'paid')
       .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
 
-    const totalExpenses = inMemoryExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const expenses = await Expense.find();
+    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
     const netProfit = totalRevenue - totalExpenses;
+    const profitMargin = totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(1)) : 0;
 
-    const totalComplaints = inMemoryComplaints.length;
-    const resolvedComplaints = inMemoryComplaints.filter(c => c.status === 'resolved').length;
-    const resolutionRate = totalComplaints > 0 ? ((resolvedComplaints / totalComplaints) * 100).toFixed(1) : 100;
+    const complaints = await Complaint.find();
+    const totalComplaints = complaints.length;
+    const resolvedComplaints = complaints.filter(c => c.status === 'resolved' || c.status === 'closed').length;
+    const resolutionRate = totalComplaints > 0 ? Number(((resolvedComplaints / totalComplaints) * 100).toFixed(1)) : 100;
 
-    res.json({
+    const activeTenants = await Tenant.countDocuments({ status: 'active' });
+    const totalVisitorsLogged = await Visitor.countDocuments();
+
+    return res.json({
       success: true,
       data: {
         occupancy: {
-          totalRooms: inMemoryRooms.length,
+          totalRooms: rooms.length,
           totalBeds,
           occupiedBeds,
-          availableBeds: totalBeds - occupiedBeds,
-          occupancyRate: Number(occupancyRate)
+          availableBeds: Math.max(0, totalBeds - occupiedBeds),
+          occupancyRate
         },
         financials: {
           totalRevenue,
           pendingDues,
           totalExpenses,
           netProfit,
-          profitMargin: totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(1)) : 0
+          profitMargin
         },
         operations: {
-          activeTenants: inMemoryTenants.filter(t => t.status === 'active').length,
+          activeTenants,
           totalComplaints,
           resolvedComplaints,
-          resolutionRate: Number(resolutionRate),
-          totalVisitorsLogged: inMemoryVisitors.length
+          resolutionRate,
+          totalVisitorsLogged
         }
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -62,24 +73,28 @@ export const getExecutiveSummary = async (req, res) => {
 // @access  Private (Admin Only)
 export const getFinancialReport = async (req, res) => {
   try {
-    const paidInvoices = inMemoryInvoices.filter(i => i.status === 'paid');
-    const unpaidInvoices = inMemoryInvoices.filter(i => i.status !== 'paid');
+    const invoices = await Invoice.find().sort({ createdAt: -1 });
+    const expenses = await Expense.find().sort({ date: -1 });
 
-    const totalRevenue = paidInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0);
-    const totalExpenses = inMemoryExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const totalRevenue = invoices
+      .filter(i => i.status === 'paid')
+      .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
 
-    res.json({
+    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const netProfit = totalRevenue - totalExpenses;
+
+    return res.json({
       success: true,
       data: {
         totalRevenue,
         totalExpenses,
-        netProfit: totalRevenue - totalExpenses,
-        invoices: inMemoryInvoices,
-        expenses: inMemoryExpenses
+        netProfit,
+        invoices,
+        expenses
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -88,7 +103,10 @@ export const getFinancialReport = async (req, res) => {
 // @access  Private (Admin Only)
 export const getOccupancyReport = async (req, res) => {
   try {
-    const roomBreakdown = inMemoryRooms.map(r => {
+    const rooms = await Room.find().sort({ floor: 1, roomNumber: 1 });
+    const tenants = await Tenant.find({ status: 'active' });
+
+    const roomBreakdown = rooms.map(r => {
       const rate = r.capacity > 0 ? Math.round(((r.occupiedBeds || 0) / r.capacity) * 100) : 0;
       return {
         roomNumber: r.roomNumber,
@@ -96,21 +114,21 @@ export const getOccupancyReport = async (req, res) => {
         type: r.type,
         capacity: r.capacity,
         occupiedBeds: r.occupiedBeds || 0,
-        availableBeds: r.capacity - (r.occupiedBeds || 0),
+        availableBeds: Math.max(0, r.capacity - (r.occupiedBeds || 0)),
         occupancyRate: rate,
         rent: r.rent,
         status: r.status
       };
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         rooms: roomBreakdown,
-        tenants: inMemoryTenants
+        tenants
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

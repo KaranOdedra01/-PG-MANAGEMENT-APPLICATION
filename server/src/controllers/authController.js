@@ -1,161 +1,188 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import mongoose from 'mongoose';
 import User from '../models/User.js';
-import { inMemoryUsers } from '../utils/inMemoryStore.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 const generateToken = (id, role) => {
-  return jwt.sign({ id, role }, process.env.JWT_SECRET || 'super_secret_pg_jwt_key_2026_student_project', {
-    expiresIn: '30d'
+  const secret = process.env.JWT_SECRET;
+  if (!secret && process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET is not set in production');
+  }
+  return jwt.sign({ id, role }, secret || 'dev_secret_pg_jwt_key_2026', {
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   });
 };
 
+// @desc    Public Tenant Registration (Enforces tenant role)
+// @route   POST /api/auth/register
+// @access  Public
 export const register = async (req, res) => {
   try {
-    const { name, email, password, role = 'tenant', phone, emergencyContact } = req.body;
+    const { name, email, password, phone, emergencyContact } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ success: false, message: 'Please provide name, email, and password' });
-    }
-
-    if (mongoose.connection.readyState === 1) {
-      const userExists = await User.findOne({ email: email.toLowerCase() });
-      if (userExists) {
-        return res.status(400).json({ success: false, message: 'User with this email already exists' });
-      }
-
-      const user = await User.create({
-        name,
-        email: email.toLowerCase(),
-        password,
-        role,
-        phone: phone || '',
-        emergencyContact: emergencyContact || {}
-      });
-
-      const token = generateToken(user._id, user.role);
-      return res.status(201).json({
-        success: true,
-        message: 'Registration successful',
-        data: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          phone: user.phone,
-          avatar: user.avatar,
-          token
-        }
+    const normalizedEmail = email.toLowerCase().trim();
+    const userExists = await User.findOne({ email: normalizedEmail });
+    if (userExists) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'A user with this email address is already registered' 
       });
     }
 
-    // In-memory fallback
-    const exists = inMemoryUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (exists) {
-      return res.status(400).json({ success: false, message: 'User already exists' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = {
-      _id: `mem_${Date.now()}`,
-      name,
-      email: email.toLowerCase(),
-      password: hashedPassword,
-      role,
+    // Security: Public registration always forces role = 'tenant'
+    const user = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password,
+      role: 'tenant',
       phone: phone || '',
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
-      isActive: true,
-      emergencyContact: emergencyContact || {},
-      createdAt: new Date()
-    };
-    inMemoryUsers.push(newUser);
+      emergencyContact: emergencyContact || {}
+    });
 
-    const token = generateToken(newUser._id, newUser.role);
-    const { password: _, ...userSafe } = newUser;
+    const token = generateToken(user._id, user.role);
+
+    await logActivity({
+      user,
+      action: 'REGISTER',
+      entity: 'User',
+      entityId: user._id,
+      description: `New tenant registered: ${user.name} (${user.email})`
+    });
 
     return res.status(201).json({
       success: true,
       message: 'Registration successful',
-      data: { ...userSafe, token }
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        avatar: user.avatar,
+        token
+      }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    User Login
+// @route   POST /api/auth/login
+// @access  Public
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Please provide email and password' });
-    }
+    const normalizedEmail = email.toLowerCase().trim();
 
-    if (mongoose.connection.readyState === 1) {
-      const user = await User.findOne({ email: email.toLowerCase() });
-      if (user) {
-        const isMatch = await user.matchPassword(password);
-        if (!isMatch) {
-          return res.status(401).json({ success: false, message: 'Invalid email or password' });
-        }
-        const token = generateToken(user._id, user.role);
-        return res.json({
-          success: true,
-          message: 'Login successful',
-          data: {
-            _id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            phone: user.phone,
-            avatar: user.avatar,
-            roomId: user.roomId,
-            token
-          }
-        });
-      }
-    }
-
-    // In-memory fallback
-    const memUser = inMemoryUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!memUser) {
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
-    const isMatch = await bcrypt.compare(password, memUser.password);
+    if (!user.isActive) {
+      return res.status(401).json({ success: false, message: 'Account is deactivated. Please contact administration.' });
+    }
+
+    const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
-    const token = generateToken(memUser._id, memUser.role);
-    const { password: _, ...userSafe } = memUser;
+    const token = generateToken(user._id, user.role);
 
     return res.json({
       success: true,
       message: 'Login successful',
-      data: { ...userSafe, token }
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        avatar: user.avatar,
+        roomId: user.roomId,
+        roomNumber: user.roomNumber,
+        token
+      }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Admin Create Staff / Admin User
+// @route   POST /api/auth/users
+// @access  Private (Admin Only)
+export const createPrivilegedUser = async (req, res) => {
+  try {
+    const { name, email, password, role, phone, emergencyContact } = req.body;
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const userExists = await User.findOne({ email: normalizedEmail });
+    if (userExists) {
+      return res.status(400).json({ success: false, message: 'A user with this email already exists' });
+    }
+
+    const user = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password,
+      role: role || 'staff',
+      phone: phone || '',
+      emergencyContact: emergencyContact || {}
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'CREATE_USER',
+      entity: 'User',
+      entityId: user._id,
+      description: `Admin created ${user.role} account: ${user.name} (${user.email})`
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `${user.role.toUpperCase()} account created successfully`,
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get Current User Profile
+// @route   GET /api/auth/me
+// @access  Private
 export const getMe = async (req, res) => {
   try {
+    const user = await User.findById(req.user._id).select('-password');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
     res.json({
       success: true,
-      data: req.user
+      data: user
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc    Get Demo Accounts Info for Quick Testing
+// @route   GET /api/auth/demo-accounts
+// @access  Public
 export const getDemoAccounts = async (req, res) => {
   res.json({
     success: true,
     data: [
       { role: 'admin', email: 'admin@pg.com', password: 'Password@123', label: 'Admin (Full Management)' },
-      { role: 'tenant', email: 'tenant@pg.com', password: 'Password@123', label: 'Tenant (Student Resident)' },
+      { role: 'tenant', email: 'tenant@pg.com', password: 'Password@123', label: 'Tenant (Resident Student)' },
       { role: 'staff', email: 'staff@pg.com', password: 'Password@123', label: 'Staff (Caretaker/Maintenance)' }
     ]
   });

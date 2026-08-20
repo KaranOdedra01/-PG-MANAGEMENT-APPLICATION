@@ -1,227 +1,233 @@
-﻿import { GoogleGenerativeAI } from '@google/generative-ai';
-import { inMemoryWeeklyMenu } from './messController.js';
-import { inMemoryNotices, inMemoryInvoices, inMemoryRooms, inMemoryUsers } from '../utils/inMemoryStore.js';
-import { inMemoryTenants } from './tenantController.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import Room from '../models/Room.js';
+import Tenant from '../models/Tenant.js';
+import Invoice from '../models/Invoice.js';
+import Complaint from '../models/Complaint.js';
+import Notice from '../models/Notice.js';
+import { MessMenu } from '../models/Mess.js';
 
 const getGeminiModel = () => {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') return null;
+  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY' || apiKey.trim() === '') return null;
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 };
 
-// @desc    Contextual Resident AI Chatbot (Dynamic Knowledge Base)
+// @desc    Contextual Resident AI Chatbot (Dynamic Real-Time Database Knowledge Base)
 // @route   POST /api/ai/chat
 // @access  Private
 export const chatWithAI = async (req, res) => {
   try {
     const { message, conversationHistory = [] } = req.body;
-    if (!message) return res.status(400).json({ success: false, message: 'Message is required' });
-
     const user = req.user;
+
     const currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-    const todayMenu = inMemoryWeeklyMenu.find(m => m.day.toLowerCase() === currentDay.toLowerCase()) || inMemoryWeeklyMenu[0];
+    const todayMenu = await MessMenu.findOne({ day: currentDay }) || {
+      breakfast: 'Standard Breakfast (Poha / Upma / Tea)',
+      lunch: 'Standard Thali (Dal, Rice, Roti, Sabzi)',
+      snacks: 'Tea & Snacks',
+      dinner: 'Dinner (Roti, Sabzi, Dal, Rice)'
+    };
 
-    const userInvoices = inMemoryInvoices.filter(i => 
-      i.tenantName?.toLowerCase() === user.name?.toLowerCase() || 
-      i.tenantId === user._id?.toString()
-    );
-    const pendingInv = userInvoices.find(i => i.status !== 'paid');
+    // 1. Fetch relevant database data for this user
+    let userSpecificContext = '';
+    let pendingInvoicesList = [];
+    let activeComplaintsList = [];
 
-    const pgContext = `
-You are the official PG AI Smart Resident Assistant for "PG Master Management Hostel".
-Here is the complete verified Hostel Knowledge Base:
+    if (user.role === 'tenant') {
+      const myInvoices = await Invoice.find({ tenantId: user._id }).sort({ dueDate: -1 }).limit(5);
+      pendingInvoicesList = myInvoices.filter(i => i.status !== 'paid');
 
-1. MEDICAL & EMERGENCY HEALTHCARE:
-   - Nearest Multi-Specialty Hospital: "City LifeCare Super-Specialty Hospital" (1.2 km from hostel, 5 mins drive). 24/7 Emergency Casualty Phone: +91 98999 11100 / Ambulance Dial 108.
-   - 24/7 Medical Pharmacy: "Apollo / MedPlus 24x7 Chemist" (300 meters from Main Gate, walking distance).
-   - First-Aid & Emergency Kit: Available 24/7 at the Ground Floor Warden Reception Desk with Caretaker Ramesh.
+      const myComplaints = await Complaint.find({ tenantId: user._id }).sort({ createdAt: -1 }).limit(5);
+      activeComplaintsList = myComplaints.filter(c => c.status !== 'resolved' && c.status !== 'closed');
 
-2. WI-FI & INTERNET SETUP INSTRUCTIONS:
-   - Network Name (SSID): "PG_HighSpeed_Fiber" (Supports dual-band 5GHz & 2.4GHz at 200 Mbps).
-   - Password: "HostelWifi@2026"
-   - Step 1: Open Settings > Wi-Fi on your Smartphone / Laptop.
-   - Step 2: Select "PG_HighSpeed_Fiber" from the list of available networks.
-   - Step 3: Enter the security password "HostelWifi@2026" and tap Connect.
-   - Step 4: If your device prompts for captive authorization, select "Trust & Connect automatically".
-   - Step 5: For coverage or speed problems, raise a ticket under the 'WiFi' category in the Complaints Hub.
+      const tenantRecord = await Tenant.findOne({ userId: user._id });
 
-3. HOSTEL RULES, TIMINGS & SECURITY:
-   - Gate Lockdown Timings: 10:30 PM sharp every night. Late entries require prior written approval from Warden Ramesh (+91 98222 11111).
-   - Visitor Policy: Visiting hours are 10:00 AM to 8:00 PM. All visitors must register at the gate security desk. Overnight guest stays require prior admin authorization.
-   - Silent Hours: 11:00 PM to 6:00 AM. Loud music or noise is strictly prohibited.
+      userSpecificContext = `
+CURRENT USER CONTEXT (TENANT):
+- Name: ${user.name}
+- Email: ${user.email}
+- Assigned Room: #${user.roomNumber || tenantRecord?.roomNumber || 'Not assigned yet'}
+- Bed: ${tenantRecord?.bedNumber || 'Bed A'}
+- Monthly Rent: ₹${tenantRecord?.monthlyRent || 'N/A'}
+- Pending Invoices: ${pendingInvoicesList.length > 0 ? pendingInvoicesList.map(i => `${i.month}: ₹${i.totalAmount} (Due: ${new Date(i.dueDate).toLocaleDateString()})`).join(', ') : 'None (All paid)'}
+- Active Complaints: ${activeComplaintsList.length > 0 ? activeComplaintsList.map(c => `#${c.ticketNumber || c._id}: ${c.title} [${c.status}]`).join(', ') : 'None'}
+`;
+    } else {
+      // Admin / Staff context
+      const totalTenants = await Tenant.countDocuments({ status: 'active' });
+      const availableRooms = await Room.find({ status: 'available' });
+      const openComplaintsCount = await Complaint.countDocuments({ status: { $in: ['open', 'assigned', 'in-progress'] } });
 
-4. TODAY'S DINING & MESS SCHEDULE (${currentDay}):
-   - Breakfast (7:30 AM - 9:30 AM): ${todayMenu.breakfast}
-   - Lunch (12:30 PM - 2:30 PM): ${todayMenu.lunch}
-   - Evening High Tea & Snacks (5:00 PM - 6:30 PM): ${todayMenu.snacks}
-   - Dinner (8:00 PM - 10:00 PM): ${todayMenu.dinner} (${todayMenu.specialNote || 'Special meal'})
+      userSpecificContext = `
+CURRENT USER CONTEXT (${user.role.toUpperCase()}):
+- Name: ${user.name}
+- Total Active Tenants: ${totalTenants}
+- Available Rooms: ${availableRooms.map(r => `Room ${r.roomNumber} (${r.type}, ${r.availableBeds} beds free, ₹${r.rent}/mo)`).join('; ') || 'No rooms available'}
+- Open Complaints: ${openComplaintsCount}
+`;
+    }
 
-5. HOSTEL AMENITIES & FACILITIES:
-   - 24/7 AC Study Room & Library: 2nd Floor (Equipped with individual desks and charging sockets).
-   - Gym & Fitness Center: Basement floor (Timings: 6:00 AM - 9:00 AM & 5:00 PM - 9:30 PM).
-   - Self-Service Laundry: 1st and 2nd floor common areas (Automatic washing machines; tokens available at reception).
-   - Courier & Parcel Drop-off: Delivery agents leave parcels at the Security Gate Reception. Address: [Your Name], Room #${user.roomNumber || '102'}, PG Master Hostel, University Campus Road.
+    // 2. Fetch active public notices
+    const activeNotices = await Notice.find({ targetRoles: { $in: ['all', user.role] } })
+      .sort({ isPinned: -1, createdAt: -1 })
+      .limit(3);
 
-6. CURRENT RESIDENT CONTEXT:
-   - Resident: ${user.name} (Room #${user.roomNumber || '102'}, Role: ${user.role})
-   - Rent Status: ${pendingInv ? `Pending invoice of Rs. ${pendingInv.totalAmount.toLocaleString()} for ${pendingInv.month} due on ${new Date(pendingInv.dueDate).toLocaleDateString()}` : 'Zero pending dues! All invoices are cleared.'}
+    // 3. Build Safe System Prompt
+    const systemPrompt = `
+You are the AI Smart Assistant for the PG Management System.
+Your job is to assist the logged-in user accurately, politely, and securely based on verified hostel database records.
 
-7. CONTACT DIRECTORY:
-   - Warden / Caretaker: Ramesh (+91 98222 11111)
-   - Electrician: Suresh (+91 98333 22222)
-   - Plumber: Karan (+91 98444 33333)
-   - Admin Office: Front Desk (Ext: 101 / contact@pgmanagement.com)
+SECURITY & PRIVACY RULES:
+1. NEVER reveal user passwords, password hashes, JWT tokens, API keys, or database credentials.
+2. If the user is a tenant, NEVER disclose personal, contact, or financial information of OTHER tenants.
+3. Only answer questions using the database facts provided below.
 
-Instructions:
-- Provide clear, well-structured, formatted responses with bold headers, bullet points, and helpful emojis.
-- If asked about hospitals, wifi steps, meals, rent, or rules, answer comprehensively using the verified facts above.
+DATABASE FACTS:
+${userSpecificContext}
+
+TODAY'S DINING MENU (${currentDay}):
+- Breakfast: ${todayMenu.breakfast}
+- Lunch: ${todayMenu.lunch}
+- Snacks: ${todayMenu.snacks}
+- Dinner: ${todayMenu.dinner} ${todayMenu.specialNote ? `(${todayMenu.specialNote})` : ''}
+
+LATEST HOSTEL NOTICES:
+${activeNotices.map(n => `- [${n.priority.toUpperCase()}] ${n.title}: ${n.content}`).join('\n') || 'No active announcements'}
+
+GENERAL HOSTEL POLICIES:
+- Main Gate Closing: 10:30 PM
+- Visiting Hours: 10:00 AM - 8:00 PM (Visitors must be registered at security gate)
+- Silent Hours: 11:00 PM - 6:00 AM
+- Emergency Ambulance: 108 | Police: 112
 `;
 
+    // 4. Try Gemini Live API
     const model = getGeminiModel();
     if (model) {
       try {
-        const prompt = `${pgContext}\n\nUser: ${message}\nAssistant:`;
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text();
+        // Cap conversation history to last 6 messages
+        const recentHistory = conversationHistory.slice(-6).map(h => {
+          const role = h.role === 'user' || h.sender === 'user' ? 'user' : 'model';
+          const text = h.content || h.text || '';
+          return `${role === 'user' ? 'User' : 'Assistant'}: ${text}`;
+        }).join('\n');
+
+        const fullPrompt = `${systemPrompt}\n\nCONVERSATION HISTORY:\n${recentHistory}\n\nUser: ${message}\nAssistant:`;
+        const result = await model.generateContent(fullPrompt);
+        const reply = result.response.text();
+
         return res.json({
           success: true,
           mode: 'gemini-live',
-          reply: responseText
+          reply
         });
       } catch (geminiError) {
-        console.warn('Gemini API call failed, falling back to built-in knowledge engine:', geminiError.message);
+        console.warn('Gemini API call failed, using database knowledge responder:', geminiError.message);
       }
     }
 
-    // Dynamic Intelligent Knowledge Responder (Zero-fail offline demo engine)
+    // 5. Database-Aware Offline Knowledge Engine (Safe Fallback)
     const q = message.toLowerCase();
     let reply = '';
 
-    if (q.includes('hospital') || q.includes('doctor') || q.includes('medical') || q.includes('clinic') || q.includes('pharmacy') || q.includes('chemist') || q.includes('emergency') || q.includes('medicine')) {
-      reply = `🏥 **Nearest Hospital & Emergency Medical Help**:
-
-1. **City LifeCare Super-Specialty Hospital** (Nearest Multi-Specialty)
-   • **Distance**: 1.2 km from Hostel (~5 minutes drive)
-   • **Emergency Casualty**: +91 98999 11100 / Ambulance Dial **108**
-   • **Services**: 24/7 Trauma, ICU, Physician on duty
-
-2. **24x7 Apollo / MedPlus Chemist & Pharmacy**
-   • **Distance**: 300 meters from PG Main Gate (walking distance)
-   • **Phone**: +91 98999 22200 (Home delivery to hostel gate available)
-
-3. **In-Hostel First Aid Box**:
-   • Available 24/7 at the **Ground Floor Warden Desk** with Caretaker Ramesh (+91 98222 11111). Contains bandage, antiseptic, burnol, and common OTC medicines.`;
-
-    } else if (q.includes('wifi') || q.includes('wi-fi') || q.includes('internet') || q.includes('connect') || q.includes('password') || q.includes('ssid')) {
-      reply = `📶 **How to Connect to Hostel High-Speed Wi-Fi**:
-
-• **Network Name (SSID)**: \`PG_HighSpeed_Fiber\` (200 Mbps Fiber)
-• **Password**: \`HostelWifi@2026\`
-
-**Step-by-Step Connection Guide**:
-1. **Open Settings**: On your smartphone, laptop, or tablet, open **Settings ➔ Wi-Fi**.
-2. **Select Network**: Look for **\`PG_HighSpeed_Fiber\`** (5GHz band recommended for high speeds).
-3. **Enter Password**: Type \`HostelWifi@2026\` (Case-sensitive) and click **Join / Connect**.
-4. **Captive Prompt**: If your device asks to trust network, tap **Connect Directly**.
-5. **Need Help?**: If you experience low signal or range drops in your room, raise a ticket under **WiFi** in the **Complaints Hub** for an access point reset!`;
-
-    } else if (q.includes('parcel') || q.includes('courier') || q.includes('delivery') || q.includes('package') || q.includes('amazon') || q.includes('flipkart') || q.includes('swiggy') || q.includes('zomato')) {
-      reply = `📦 **Hostel Courier & Delivery Policy**:
-
-• **Delivery Address Format**:
-  *[Your Name]*
-  *Room #${user.roomNumber || '102'}*, PG Master Hostel
-  *University Campus Road, Tech City - 380009*
-  *Phone: [Your Phone Number]*
-
-• **Parcel Collection**:
-  - E-commerce parcels (Amazon, Flipkart) are held safely at the **Security Gate Desk**.
-  - Food deliveries (Swiggy, Zomato) must be collected in-person at the main gate reception.`;
-
-    } else if (q.includes('gym') || q.includes('fitness') || q.includes('workout')) {
-      reply = `🏋️ **Hostel Gym & Fitness Center**:
-• **Location**: Basement Floor
-• **Morning Slot**: 6:00 AM – 9:00 AM
-• **Evening Slot**: 5:00 PM – 9:30 PM
-• **Amenities**: Treadmills, Dumbbells, Multi-bench, Yoga mats, Water cooler
-• *Free access for all registered hostel residents.*`;
-
-    } else if (q.includes('study') || q.includes('library') || q.includes('reading')) {
-      reply = `📚 **24/7 Silent Study Room & Library**:
-• **Location**: 2nd Floor (Room 205)
-• **Timings**: **Open 24/7** for students & exam preparation
-• **Features**: Individual ergonomic desks, power outlets, centralized AC, and dedicated high-speed study WiFi.`;
-
-    } else if (q.includes('laundry') || q.includes('washing') || q.includes('clothes')) {
-      reply = `🧺 **Self-Service Laundry Facilities**:
-• **Location**: 1st Floor & 2nd Floor Utility Zones
-• **Timings**: 7:00 AM – 9:00 PM
-• **Equipment**: Commercial front-load washing machines & drying racks.
-• Wash tokens can be collected from Caretaker Ramesh.`;
-
-    } else if (q.includes('menu') || q.includes('food') || q.includes('dinner') || q.includes('lunch') || q.includes('breakfast') || q.includes('eat') || q.includes('snack')) {
+    if (q.includes('menu') || q.includes('food') || q.includes('lunch') || q.includes('dinner') || q.includes('breakfast') || q.includes('meal')) {
       reply = `🍽️ **Today's (${currentDay}) Mess Menu**:
-• 🌅 **Breakfast (7:30 - 9:30 AM)**: ${todayMenu.breakfast}
-• ☀️ **Lunch (12:30 - 2:30 PM)**: ${todayMenu.lunch}
-• ☕ **Evening Snacks (5:00 - 6:30 PM)**: ${todayMenu.snacks}
-• 🌙 **Dinner (8:00 - 10:00 PM)**: ${todayMenu.dinner} (*${todayMenu.specialNote}*)
+• 🌅 **Breakfast**: ${todayMenu.breakfast}
+• ☀️ **Lunch**: ${todayMenu.lunch}
+• ☕ **Evening Snacks**: ${todayMenu.snacks}
+• 🌙 **Dinner**: ${todayMenu.dinner} ${todayMenu.specialNote ? `(*${todayMenu.specialNote}*)` : ''}
 
-*(Tip: You can toggle your attendance in 1-click on the Mess page if skipping any meal).*`;
+*(You can toggle meal attendance on the Mess page if skipping any meal).*`;
 
-    } else if (q.includes('gate') || q.includes('timing') || q.includes('time') || q.includes('lock') || q.includes('curfew') || q.includes('night') || q.includes('late')) {
-      reply = `🚪 **Hostel Gate Policy & Curfew Timings**:
-• The main entrance gate closes strictly at **10:30 PM** every night.
-• Gate opens in the morning at **6:00 AM**.
-• For college projects, exam shifts, or late-night arrivals, obtain prior approval from Warden Ramesh (+91 98222 11111).`;
+    } else if (q.includes('rent') || q.includes('due') || q.includes('invoice') || q.includes('bill') || q.includes('pay')) {
+      if (user.role === 'tenant') {
+        if (pendingInvoicesList.length > 0) {
+          const inv = pendingInvoicesList[0];
+          reply = `💳 **Your Pending Rent Statement**:
+• **Billing Month**: ${inv.month}
+• **Total Amount**: **₹${inv.totalAmount.toLocaleString()}**
+• **Due Date**: ${new Date(inv.dueDate).toLocaleDateString()}
 
-    } else if (q.includes('rent') || q.includes('due') || q.includes('fee') || q.includes('pay') || q.includes('invoice') || q.includes('receipt')) {
-      if (pendingInv) {
-        reply = `💳 **Your Pending Rent Statement**:
-• **Month**: ${pendingInv.month}
-• **Total Amount**: **₹${pendingInv.totalAmount.toLocaleString()}**
-• **Due Date**: ${new Date(pendingInv.dueDate).toLocaleDateString()}
-
-You can pay online via UPI on the **Rent & Invoices** page and download your instant official PDF receipt!`;
+You can record your payment directly on the **Invoices** page and download your instant official PDF receipt!`;
+        } else {
+          reply = `✅ **Rent Status**: You have **zero pending dues**! All your invoices are cleared. You can view payment history on the **Invoices** tab.`;
+        }
       } else {
-        reply = `✅ **Rent Status**: You have **zero pending dues**! All your invoices are cleared. You can download payment receipts anytime from the **Rent & Invoices** tab.`;
+        const invoices = await Invoice.find();
+        const pendingTotal = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.totalAmount || 0), 0);
+        const collectedTotal = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.totalAmount || 0), 0);
+        reply = `💳 **Hostel Rent Overview**:
+• Total Collected: **₹${collectedTotal.toLocaleString()}**
+• Total Outstanding / Pending: **₹${pendingTotal.toLocaleString()}**
+Check the **Invoices** tab for detailed records.`;
       }
 
-    } else if (q.includes('complaint') || q.includes('repair') || q.includes('broken') || q.includes('plumber') || q.includes('electrician') || q.includes('ac') || q.includes('fan') || q.includes('leak')) {
-      reply = `🔧 **Maintenance & Repairs**:
-• You can log a repair ticket anytime in the **Complaints Hub**.
-• Our caretakers Ramesh (Caretaker) and Suresh (Electrician) typically resolve issues within 2 to 4 hours.`;
+    } else if (q.includes('room') || q.includes('vacant') || q.includes('bed') || q.includes('availability')) {
+      const availableRooms = await Room.find({ status: 'available' });
+      if (availableRooms.length > 0) {
+        reply = `🛏️ **Available Rooms & Beds**:
+${availableRooms.map(r => `• **Room ${r.roomNumber}** (${r.type.toUpperCase()}) — ${r.availableBeds} beds available (Rent: ₹${r.rent.toLocaleString()}/month)`).join('\n')}`;
+      } else {
+        reply = `🛏️ All rooms are currently fully occupied or under maintenance. Check the **Rooms** tab for real-time status.`;
+      }
 
-    } else if (q.includes('contact') || q.includes('warden') || q.includes('caretaker') || q.includes('phone') || q.includes('emergency')) {
-      reply = `📞 **Emergency & Hostel Contacts**:
-• **Warden / Caretaker**: Ramesh (+91 98222 11111)
-• **Hostel Electrician**: Suresh (+91 98333 22222)
-• **Hostel Plumber**: Karan (+91 98444 33333)
-• **Admin Desk**: Front Office (Ext: 101 / contact@pgmanagement.com)
-• **Emergency Ambulance / Police**: 108 / 112`;
+    } else if (q.includes('complaint') || q.includes('repair') || q.includes('issue') || q.includes('maintenance')) {
+      if (user.role === 'tenant') {
+        if (activeComplaintsList.length > 0) {
+          reply = `🔧 **Your Active Maintenance Tickets**:
+${activeComplaintsList.map(c => `• **#${c.ticketNumber || c._id}** — ${c.title} (Status: **${c.status.toUpperCase()}**, Priority: ${c.priority})`).join('\n')}
+
+You can raise a new ticket or check progress on the **Complaints** page.`;
+        } else {
+          reply = `✅ You have no active maintenance complaints. If you need repairs, you can raise a ticket anytime in the **Complaints** hub!`;
+        }
+      } else {
+        const openCount = await Complaint.countDocuments({ status: { $in: ['open', 'assigned', 'in-progress'] } });
+        reply = `🔧 **Maintenance Overview**: There are currently **${openCount} unresolved complaints** in the system. Check the **Complaints** hub to assign staff.`;
+      }
+
+    } else if (q.includes('notice') || q.includes('announcement') || q.includes('rule')) {
+      if (activeNotices.length > 0) {
+        reply = `📢 **Active Hostel Announcements**:
+${activeNotices.map(n => `• **${n.title}** (${n.category}): ${n.content}`).join('\n\n')}`;
+      } else {
+        reply = `📢 There are currently no new announcements on the notice board.`;
+      }
+
+    } else if (q.includes('wifi') || q.includes('internet')) {
+      reply = `📶 **Wi-Fi Connection Guide**:
+• Network SSID: \`PG_HighSpeed_Fiber\` (200 Mbps)
+• Password: Check with the hostel administrator / front desk.
+• If you experience slow speeds or connection drops in your room, raise a ticket under **Internet** in the **Complaints** section!`;
+
+    } else if (q.includes('gate') || q.includes('curfew') || q.includes('timing') || q.includes('visitor')) {
+      reply = `🚪 **Hostel Timings & Visitor Policy**:
+• Main Gate Closes: **10:30 PM** every night (Opens at 6:00 AM).
+• Visiting Hours: **10:00 AM to 8:00 PM**.
+• All visitors must register at the security gate on arrival. Late entries require prior permission from the hostel administrator.`;
 
     } else {
-      reply = `Hello **${user.name}**! 👋 I am your 24/7 PG Assistant. Here are topics I can help you with:
+      reply = `Hello **${user.name}**! 👋 I am your PG Smart Assistant powered by Gemini.
 
-• 🏥 **Nearest Hospital & Emergency Medical Help**
-• 📶 **Wi-Fi Password & Step-by-Step Connection Guide**
-• 🍽️ **Today's 4-Meal Mess Schedule & Menu**
-• 🚪 **Hostel Gate Closing Policy & Timings**
-• 📦 **Courier Delivery & Parcel Guidelines**
-• 🏋️ **Gym & 24/7 Study Room Timings**
-• 💳 **Check Rent Dues & Online Payments**
-• 🔧 **Raise Maintenance & Repair Tickets**
+Here are things you can ask me:
+• 🍽️ *"What is today's mess menu?"*
+• 💳 *"What are my rent dues?"*
+• 🛏️ *"Which rooms are vacant?"*
+• 🔧 *"What is the status of my complaints?"*
+• 📢 *"Show latest notices"*
+• 🚪 *"What are the hostel gate timings?"*
 
-What would you like to know?`;
+How can I help you today?`;
     }
 
-    res.json({
+    return res.json({
       success: true,
-      mode: 'knowledge-engine',
+      mode: 'database-engine',
       reply
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -231,47 +237,45 @@ What would you like to know?`;
 export const classifyComplaint = async (req, res) => {
   try {
     const { title, description } = req.body;
-    if (!description) return res.status(400).json({ success: false, message: 'Description is required' });
-
     const text = ((title || '') + ' ' + description).toLowerCase();
 
     let category = 'other';
     let priority = 'medium';
-    let suggestedStaff = 'Ramesh Caretaker';
+    let suggestedStaff = 'Caretaker';
     let estimatedResolutionHours = 4;
     let analysisSummary = 'General hostel maintenance request.';
 
     if (text.includes('spark') || text.includes('shock') || text.includes('fire') || text.includes('geyser') || text.includes('switch') || text.includes('mcb') || text.includes('light') || text.includes('fan') || text.includes('ac') || text.includes('power')) {
       category = 'electrical';
-      suggestedStaff = 'Suresh Electrician';
-      if (text.includes('spark') || text.includes('shock') || text.includes('fire') || text.includes('trip') || text.includes('smoke')) {
+      suggestedStaff = 'Electrician';
+      if (text.includes('spark') || text.includes('shock') || text.includes('fire') || text.includes('smoke')) {
         priority = 'urgent';
         estimatedResolutionHours = 1;
-        analysisSummary = 'High-risk electrical fault detected. Immediate electrician inspection required to prevent hazards.';
+        analysisSummary = 'High-risk electrical hazard detected. Immediate inspection required.';
       } else {
         priority = 'high';
         estimatedResolutionHours = 3;
-        analysisSummary = 'Standard electrical repair for appliance or power socket.';
+        analysisSummary = 'Electrical appliance or socket repair request.';
       }
     } else if (text.includes('leak') || text.includes('tap') || text.includes('pipe') || text.includes('water') || text.includes('flush') || text.includes('drain') || text.includes('clog') || text.includes('toilet') || text.includes('sink')) {
       category = 'plumbing';
-      suggestedStaff = 'Karan Plumber';
-      if (text.includes('flood') || text.includes('overflow') || text.includes('burst')) {
+      suggestedStaff = 'Plumber';
+      if (text.includes('flood') || text.includes('burst')) {
         priority = 'urgent';
         estimatedResolutionHours = 1;
-        analysisSummary = 'Major plumbing overflow reported. Urgent water shut-off and repair needed.';
+        analysisSummary = 'Severe plumbing leak/overflow reported. Urgent water shut-off needed.';
       } else {
         priority = 'medium';
         estimatedResolutionHours = 4;
         analysisSummary = 'Routine sanitary or tap leakage repair.';
       }
-    } else if (text.includes('wifi') || text.includes('internet') || text.includes('router') || text.includes('speed') || text.includes('connection') || text.includes('network')) {
+    } else if (text.includes('wifi') || text.includes('internet') || text.includes('router') || text.includes('network') || text.includes('speed')) {
       category = 'internet';
       priority = 'medium';
-      suggestedStaff = 'Airtel Fiber Support';
+      suggestedStaff = 'Network Support';
       estimatedResolutionHours = 2;
-      analysisSummary = 'Network connectivity or bandwidth troubleshooting.';
-    } else if (text.includes('clean') || text.includes('dust') || text.includes('trash') || text.includes('garbage') || text.includes('sweep') || text.includes('bathroom dirty')) {
+      analysisSummary = 'Internet connectivity or bandwidth troubleshooting.';
+    } else if (text.includes('clean') || text.includes('dust') || text.includes('trash') || text.includes('garbage') || text.includes('sweep')) {
       category = 'cleaning';
       priority = 'low';
       suggestedStaff = 'Housekeeping Staff';
@@ -282,10 +286,10 @@ export const classifyComplaint = async (req, res) => {
       priority = 'urgent';
       suggestedStaff = 'Security Head & Warden';
       estimatedResolutionHours = 1;
-      analysisSummary = 'Security alert requiring immediate warden intervention.';
+      analysisSummary = 'Security alert requiring immediate intervention.';
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         category,
@@ -293,11 +297,11 @@ export const classifyComplaint = async (req, res) => {
         suggestedStaff,
         estimatedResolutionHours,
         analysisSummary,
-        confidenceScore: '96.8%'
+        confidenceScore: '96.5%'
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -306,31 +310,34 @@ export const classifyComplaint = async (req, res) => {
 // @access  Private (Admin Only)
 export const composeRentReminder = async (req, res) => {
   try {
-    const { tenantName, roomNumber, amount, month, dueDate, tone = 'polite' } = req.body;
+    const { tenantName, roomNumber, amount, month, dueDate } = req.body;
+
+    const formattedAmount = amount ? Number(amount).toLocaleString() : '7,500';
+    const formattedDueDate = dueDate ? new Date(dueDate).toLocaleDateString() : 'within 5 days';
 
     const message = `Dear ${tenantName || 'Resident'},
 
-This is a gentle reminder regarding your monthly hostel rent payment for ${month || 'this month'} for Room #${roomNumber || '102'}.
+This is a friendly reminder regarding your monthly PG hostel accommodation fee for ${month || 'this month'} (Room #${roomNumber || '101'}).
 
-• Total Amount Payable: Rs. ${amount ? Number(amount).toLocaleString() : '7,500'}
-• Payment Due Date: ${dueDate ? new Date(dueDate).toLocaleDateString() : 'within 5 days'}
-• Payment Modes: UPI, Net Banking, or Direct Desk Deposit
+• Total Amount Payable: ₹${formattedAmount}
+• Due Date: ${formattedDueDate}
+• Payment Modes: UPI, Net Banking, or Direct Desk Payment
 
-You can complete your payment in 1-click on your resident dashboard and download your official PDF receipt instantly.
+Please complete the payment on your resident portal to avoid late fees. Instant official receipts are generated upon payment.
 
 Thank you for your cooperation!
-Warm regards,
-PG Master Management Team`;
+Best regards,
+PG Management Team`;
 
-    res.json({
+    return res.json({
       success: true,
       data: {
-        subject: `Gentle Rent Payment Reminder - ${month} (Room #${roomNumber})`,
+        subject: `Rent Payment Reminder: ${month || 'Current Month'} (Room #${roomNumber || '101'})`,
         message,
-        smsText: `Dear ${tenantName}, gentle reminder: PG Rent of Rs. ${amount} for ${month} (Room ${roomNumber}) is due on ${dueDate}. Please pay via resident portal. Thanks, PG Admin.`
+        smsText: `Dear ${tenantName || 'Resident'}, reminder: PG rent of ₹${formattedAmount} for ${month || 'this month'} is due on ${formattedDueDate}. Please pay via resident portal.`
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

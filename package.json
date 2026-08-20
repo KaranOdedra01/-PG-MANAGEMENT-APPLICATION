@@ -1,13 +1,25 @@
-﻿{
+{
   "name": "pg-management-system",
-  "version": "1.0.0",
-  "description": "Full-Stack PG Management System with Gemini AI",
+  "version": "2.0.0",
+  "description": "Full-Stack PG Management System (MERN + Gemini AI)",
   "scripts": {
     "server": "npm --prefix server start",
-    "client": "npm --prefix client dev",
-    "test:auth": "node server/test_auth.cjs"
+    "server:dev": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev",
+    "client:build": "npm --prefix client run build",
+    "seed": "npm --prefix server run seed",
+    "test": "npm --prefix server run test",
+    "build": "npm --prefix client run build"
   },
-  "keywords": ["pg-management", "hostel", "react", "express", "mongodb", "gemini-ai"],
+  "keywords": [
+    "pg-management",
+    "hostel",
+    "react",
+    "express",
+    "mongodb",
+    "gemini-ai",
+    "mern"
+  ],
   "author": "Karan Odedra",
   "license": "MIT"
 }

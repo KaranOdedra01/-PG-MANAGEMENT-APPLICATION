@@ -1,12 +1,14 @@
-﻿{
+{
   "name": "pg-management-server",
-  "version": "1.0.0",
-  "description": "Backend API for PG Management System",
+  "version": "2.0.0",
+  "description": "Production-grade Backend API for PG Management System",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "seed": "node src/utils/seed.js",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
@@ -20,5 +22,8 @@
     "mongoose": "^8.9.5",
     "morgan": "^1.10.0",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
   }
 }

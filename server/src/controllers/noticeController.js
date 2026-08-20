@@ -1,126 +1,156 @@
-import mongoose from 'mongoose';
 import Notice from '../models/Notice.js';
-import { inMemoryNotices } from '../utils/inMemoryStore.js';
+import User from '../models/User.js';
+import Notification from '../models/Notification.js';
+import { logActivity } from '../utils/activityLogger.js';
 
-// @desc    Get all active notices
+// @desc    Get all active notices (Role targeted)
 // @route   GET /api/notices
 // @access  Private (All Roles)
 export const getNotices = async (req, res) => {
   try {
     const { category, priority, search } = req.query;
-    let results = [...inMemoryNotices];
+    const userRole = req.user.role;
+
+    const query = {
+      targetRoles: { $in: ['all', userRole] }
+    };
 
     if (category && category !== 'all') {
-      results = results.filter(n => n.category.toLowerCase() === category.toLowerCase());
+      query.category = category.toLowerCase();
     }
     if (priority && priority !== 'all') {
-      results = results.filter(n => n.priority.toLowerCase() === priority.toLowerCase());
+      query.priority = priority.toLowerCase();
     }
     if (search) {
-      const q = search.toLowerCase();
-      results = results.filter(n => 
-        n.title.toLowerCase().includes(q) || 
-        n.content.toLowerCase().includes(q)
-      );
+      const q = search.trim();
+      query.$or = [
+        { title: { $regex: q, $options: 'i' } },
+        { content: { $regex: q, $options: 'i' } }
+      ];
     }
 
-    // Sort pinned first, then by date descending
-    results.sort((a, b) => {
-      if (a.isPinned && !b.isPinned) return -1;
-      if (!a.isPinned && b.isPinned) return 1;
-      return new Date(b.createdAt) - new Date(a.createdAt);
-    });
+    // Pinned first, then newest
+    const notices = await Notice.find(query).sort({ isPinned: -1, createdAt: -1 });
 
-    res.json({
+    return res.json({
       success: true,
-      count: results.length,
-      data: results
+      count: notices.length,
+      data: notices
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get Single Notice
+// @desc    Get Single Notice by ID
 // @route   GET /api/notices/:id
 // @access  Private
 export const getNoticeById = async (req, res) => {
   try {
     const { id } = req.params;
-    const notice = inMemoryNotices.find(n => n._id.toString() === id.toString());
-    if (!notice) return res.status(404).json({ success: false, message: 'Notice not found' });
-    res.json({ success: true, data: notice });
+    const notice = await Notice.findById(id);
+
+    if (!notice) {
+      return res.status(404).json({ success: false, message: 'Notice not found' });
+    }
+
+    return res.json({
+      success: true,
+      data: notice
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // @desc    Broadcast a New Notice
 // @route   POST /api/notices
-// @access  Private (Admin Only)
+// @access  Private (Admin & Staff)
 export const createNotice = async (req, res) => {
   try {
     const { title, content, category = 'general', priority = 'medium', targetRoles = ['all'], isPinned = false } = req.body;
 
-    if (!title || !content) {
-      return res.status(400).json({ success: false, message: 'Please provide title and content' });
-    }
-
-    const newNotice = {
-      _id: 'not_' + Date.now(),
-      title,
-      content,
+    const notice = await Notice.create({
+      title: title.trim(),
+      content: content.trim(),
       category: category.toLowerCase(),
       priority: priority.toLowerCase(),
       targetRoles: Array.isArray(targetRoles) ? targetRoles : ['all'],
-      postedBy: req.user?.name || 'Admin',
+      postedBy: req.user.name || 'Admin',
       isPinned: Boolean(isPinned),
-      readBy: [],
-      createdAt: new Date()
-    };
+      readBy: []
+    });
 
-    inMemoryNotices.unshift(newNotice);
+    // Send in-app notification to targeted users
+    const roleFilter = targetRoles.includes('all') ? {} : { role: { $in: targetRoles } };
+    const targetUsers = await User.find(roleFilter);
+    for (const u of targetUsers) {
+      if (u._id.toString() !== req.user._id.toString()) {
+        await Notification.create({
+          recipient: u._id,
+          type: 'notice',
+          title: `Announcement: ${notice.title}`,
+          message: notice.content.substring(0, 100) + '...',
+          link: '/notices'
+        });
+      }
+    }
 
-    res.status(201).json({
+    await logActivity({
+      user: req.user,
+      action: 'CREATE_NOTICE',
+      entity: 'Notice',
+      entityId: notice._id,
+      description: `Broadcasted notice: ${notice.title} (${notice.category})`
+    });
+
+    return res.status(201).json({
       success: true,
       message: 'Notice broadcasted successfully',
-      data: newNotice
+      data: notice
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // @desc    Update a Notice
 // @route   PUT /api/notices/:id
-// @access  Private (Admin Only)
+// @access  Private (Admin & Staff)
 export const updateNotice = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, category, priority, isPinned } = req.body;
+    const { title, content, category, priority, targetRoles, isPinned } = req.body;
 
-    const index = inMemoryNotices.findIndex(n => n._id.toString() === id.toString());
-    if (index === -1) {
+    const notice = await Notice.findById(id);
+    if (!notice) {
       return res.status(404).json({ success: false, message: 'Notice not found' });
     }
 
-    const current = inMemoryNotices[index];
-    inMemoryNotices[index] = {
-      ...current,
-      title: title || current.title,
-      content: content || current.content,
-      category: category ? category.toLowerCase() : current.category,
-      priority: priority ? priority.toLowerCase() : current.priority,
-      isPinned: isPinned !== undefined ? Boolean(isPinned) : current.isPinned
-    };
+    if (title) notice.title = title.trim();
+    if (content) notice.content = content.trim();
+    if (category) notice.category = category.toLowerCase();
+    if (priority) notice.priority = priority.toLowerCase();
+    if (targetRoles) notice.targetRoles = Array.isArray(targetRoles) ? targetRoles : [targetRoles];
+    if (isPinned !== undefined) notice.isPinned = Boolean(isPinned);
 
-    res.json({
+    await notice.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_NOTICE',
+      entity: 'Notice',
+      entityId: notice._id,
+      description: `Updated notice: ${notice.title}`
+    });
+
+    return res.json({
       success: true,
       message: 'Notice updated successfully',
-      data: inMemoryNotices[index]
+      data: notice
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -130,25 +160,25 @@ export const updateNotice = async (req, res) => {
 export const acknowledgeNotice = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id ? req.user._id.toString() : 'usr_anon';
+    const userId = req.user._id;
 
-    const notice = inMemoryNotices.find(n => n._id.toString() === id.toString());
+    const notice = await Notice.findById(id);
     if (!notice) {
       return res.status(404).json({ success: false, message: 'Notice not found' });
     }
 
-    if (!notice.readBy) notice.readBy = [];
     if (!notice.readBy.includes(userId)) {
       notice.readBy.push(userId);
+      await notice.save();
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Notice acknowledged',
       data: notice
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -158,14 +188,27 @@ export const acknowledgeNotice = async (req, res) => {
 export const deleteNotice = async (req, res) => {
   try {
     const { id } = req.params;
-    const index = inMemoryNotices.findIndex(n => n._id.toString() === id.toString());
-    if (index === -1) {
+    const notice = await Notice.findById(id);
+
+    if (!notice) {
       return res.status(404).json({ success: false, message: 'Notice not found' });
     }
 
-    inMemoryNotices.splice(index, 1);
-    res.json({ success: true, message: 'Notice deleted successfully' });
+    await notice.deleteOne();
+
+    await logActivity({
+      user: req.user,
+      action: 'DELETE_NOTICE',
+      entity: 'Notice',
+      entityId: id,
+      description: `Deleted notice: ${notice.title}`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Notice deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
