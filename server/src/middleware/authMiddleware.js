@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { getJwtSecret } from '../config/env.js';
 
 export const protect = async (req, res, next) => {
   let token;
@@ -7,15 +8,8 @@ export const protect = async (req, res, next) => {
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
       token = req.headers.authorization.split(' ')[1];
-      
-      const secret = process.env.JWT_SECRET;
-      if (!secret) {
-        if (process.env.NODE_ENV === 'production') {
-          throw new Error('JWT_SECRET is not configured in production environment');
-        }
-      }
-
-      const decoded = jwt.verify(token, secret || 'dev_secret_pg_jwt_key_2026');
+      const secret = getJwtSecret();
+      const decoded = jwt.verify(token, secret);
       const user = await User.findById(decoded.id).select('-password');
 
       if (!user) {
@@ -28,7 +22,7 @@ export const protect = async (req, res, next) => {
       if (!user.isActive) {
         return res.status(401).json({ 
           success: false, 
-          message: 'Not authorized: Account is deactivated' 
+          message: 'Not authorized: Account is deactivated. Please contact administration.' 
         });
       }
 
@@ -43,14 +37,14 @@ export const protect = async (req, res, next) => {
       }
       return res.status(401).json({ 
         success: false, 
-        message: 'Not authorized: Invalid token' 
+        message: 'Not authorized: Invalid or malformed authentication token' 
       });
     }
   }
 
   return res.status(401).json({ 
     success: false, 
-    message: 'Not authorized: No token provided' 
+    message: 'Not authorized: No authentication token provided' 
   });
 };
 

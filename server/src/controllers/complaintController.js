@@ -4,13 +4,27 @@ import Tenant from '../models/Tenant.js';
 import Notification from '../models/Notification.js';
 import { logActivity } from '../utils/activityLogger.js';
 
-// @desc    Get all complaints (Admins/Staff see all, Tenants see only own)
+// Valid complaint lifecycle state transition matrix
+const validTransitions = {
+  'open': ['assigned', 'in-progress'],
+  'assigned': ['in-progress', 'waiting-for-parts', 'open'],
+  'in-progress': ['waiting-for-parts', 'resolved'],
+  'waiting-for-parts': ['in-progress', 'resolved'],
+  'resolved': ['closed', 'in-progress'],
+  'closed': ['open'] // only re-openable
+};
+
+// @desc    Get complaints with Pagination, Search & Role Protection
 // @route   GET /api/complaints
 // @access  Private
 export const getComplaints = async (req, res) => {
   try {
     const role = req.user.role;
     const { status, priority, category, search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
     const query = {};
 
     // IDOR Protection: Tenants only see their own complaints
@@ -37,12 +51,22 @@ export const getComplaints = async (req, res) => {
       ];
     }
 
-    const complaints = await Complaint.find(query).sort({ createdAt: -1 });
+    const total = await Complaint.countDocuments(query);
+    const complaints = await Complaint.find(query)
+      .populate('assignedStaffId', 'name email role phone')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.json({
       success: true,
-      count: complaints.length,
-      data: complaints
+      data: complaints,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -55,7 +79,7 @@ export const getComplaints = async (req, res) => {
 export const getComplaintById = async (req, res) => {
   try {
     const { id } = req.params;
-    const complaint = await Complaint.findById(id);
+    const complaint = await Complaint.findById(id).populate('assignedStaffId', 'name email role phone');
 
     if (!complaint) {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
@@ -100,22 +124,10 @@ export const createComplaint = async (req, res) => {
       category: category.toLowerCase(),
       priority: priority.toLowerCase(),
       status: 'open',
+      attachments,
       assignedTo: 'Unassigned',
-      resolutionNote: '',
-      attachments: Array.isArray(attachments) ? attachments : []
+      assignedStaffId: null
     });
-
-    // Notify Admins & Staff
-    const adminsAndStaff = await User.find({ role: { $in: ['admin', 'staff'] } });
-    for (const admin of adminsAndStaff) {
-      await Notification.create({
-        recipient: admin._id,
-        type: 'complaint',
-        title: `New [${priority.toUpperCase()}] Complaint: ${complaint.title}`,
-        message: `${req.user.name} from Room #${assignedRoom} raised a ${category} complaint.`,
-        link: '/complaints'
-      });
-    }
 
     await logActivity({
       user: req.user,
@@ -135,7 +147,7 @@ export const createComplaint = async (req, res) => {
   }
 };
 
-// @desc    Update Complaint Status
+// @desc    Update Complaint Status with Valid Lifecycle Transitions
 // @route   PATCH /api/complaints/:id/status
 // @access  Private (Admin & Staff)
 export const updateComplaintStatus = async (req, res) => {
@@ -148,9 +160,20 @@ export const updateComplaintStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
+    // Enforce valid lifecycle transitions (Admin can override)
+    if (req.user.role !== 'admin') {
+      const allowedNext = validTransitions[complaint.status] || [];
+      if (!allowedNext.includes(status) && complaint.status !== status) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status transition from '${complaint.status}' to '${status}'. Allowed transitions: ${allowedNext.join(', ')}`
+        });
+      }
+    }
+
     complaint.status = status;
     if (resolutionNote) complaint.resolutionNote = resolutionNote.trim();
-    if (actualCost) complaint.actualCost = Number(actualCost);
+    if (actualCost !== undefined) complaint.actualCost = Number(actualCost);
 
     if (status === 'resolved') {
       complaint.resolvedAt = new Date();
@@ -188,7 +211,7 @@ export const updateComplaintStatus = async (req, res) => {
   }
 };
 
-// @desc    Assign Staff to Complaint
+// @desc    Assign Staff to Complaint with Verification
 // @route   PATCH /api/complaints/:id/assign
 // @access  Private (Admin & Staff)
 export const assignComplaint = async (req, res) => {
@@ -201,8 +224,23 @@ export const assignComplaint = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
-    complaint.assignedTo = assignedTo.trim();
-    if (assignedStaffId) complaint.assignedStaffId = assignedStaffId;
+    let staffName = assignedTo ? assignedTo.trim() : 'Assigned Staff';
+    let validStaffId = null;
+
+    if (assignedStaffId) {
+      const staffUser = await User.findById(assignedStaffId);
+      if (!staffUser || (staffUser.role !== 'staff' && staffUser.role !== 'admin') || !staffUser.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Assigned user must be an active staff or administrator'
+        });
+      }
+      staffName = staffUser.name;
+      validStaffId = staffUser._id;
+    }
+
+    complaint.assignedTo = staffName;
+    complaint.assignedStaffId = validStaffId;
     complaint.assignedAt = new Date();
     if (complaint.status === 'open') {
       complaint.status = 'assigned';
@@ -215,7 +253,7 @@ export const assignComplaint = async (req, res) => {
       recipient: complaint.tenantId,
       type: 'complaint',
       title: 'Complaint Assigned',
-      message: `Your complaint #${complaint.ticketNumber || complaint._id} has been assigned to ${complaint.assignedTo}.`,
+      message: `Your complaint #${complaint.ticketNumber || complaint._id} has been assigned to ${staffName}.`,
       link: '/complaints'
     });
 
@@ -224,12 +262,12 @@ export const assignComplaint = async (req, res) => {
       action: 'ASSIGN_COMPLAINT',
       entity: 'Complaint',
       entityId: complaint._id,
-      description: `Assigned complaint #${complaint.ticketNumber || complaint._id} to ${complaint.assignedTo}`
+      description: `Assigned complaint #${complaint.ticketNumber || complaint._id} to ${staffName}`
     });
 
     return res.json({
       success: true,
-      message: `Complaint assigned to ${complaint.assignedTo}`,
+      message: `Complaint assigned to ${staffName}`,
       data: complaint
     });
   } catch (error) {

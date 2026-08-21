@@ -2,34 +2,33 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { protect, authorize } from '../src/middleware/authMiddleware.js';
-
-const TEST_SECRET = 'dev_secret_pg_jwt_key_2026';
+import { authorize } from '../src/middleware/authMiddleware.js';
+import { TEST_JWT_SECRET } from './test_helper.js';
 
 describe('Authentication & Authorization Security Tests', () => {
   describe('JWT Security', () => {
     it('should generate a signed JWT with role and user id', () => {
       const payload = { id: '66c1a0010000000000000001', role: 'admin' };
-      const token = jwt.sign(payload, TEST_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign(payload, TEST_JWT_SECRET, { expiresIn: '1h' });
 
-      const decoded = jwt.verify(token, TEST_SECRET);
+      const decoded = jwt.verify(token, TEST_JWT_SECRET);
       assert.equal(decoded.id, payload.id);
       assert.equal(decoded.role, 'admin');
     });
 
     it('should reject tampered JWT token', () => {
       const payload = { id: '66c1a0010000000000000002', role: 'tenant' };
-      const token = jwt.sign(payload, TEST_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign(payload, TEST_JWT_SECRET, { expiresIn: '1h' });
       const tampered = token.slice(0, -5) + 'AAAAA';
 
-      assert.throws(() => jwt.verify(tampered, TEST_SECRET));
+      assert.throws(() => jwt.verify(tampered, TEST_JWT_SECRET));
     });
 
     it('should reject expired JWT token', () => {
       const payload = { id: '66c1a0010000000000000002', role: 'tenant' };
-      const expiredToken = jwt.sign(payload, TEST_SECRET, { expiresIn: '-1s' });
+      const expiredToken = jwt.sign(payload, TEST_JWT_SECRET, { expiresIn: '-1s' });
 
-      assert.throws(() => jwt.verify(expiredToken, TEST_SECRET));
+      assert.throws(() => jwt.verify(expiredToken, TEST_JWT_SECRET));
     });
   });
 

@@ -78,8 +78,16 @@ const tenantSchema = new mongoose.Schema({
     enum: ['active', 'notice-period', 'checked-out'], 
     default: 'active',
     index: true 
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, { timestamps: true });
 
 export default mongoose.models.Tenant || mongoose.model('Tenant', tenantSchema);
-

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const bedSchema = new mongoose.Schema({
-  bedNumber: { type: String, required: true },
+  bedNumber: { type: String, required: true, trim: true },
   isOccupied: { type: Boolean, default: false },
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { _id: false });
@@ -63,8 +63,19 @@ roomSchema.virtual('availableBeds').get(function() {
   return Math.max(0, this.capacity - (this.occupiedBeds || 0));
 });
 
-// Auto-sync status based on occupancy
+// Single source of truth: synchronize occupiedBeds and status strictly from beds subdocument
 roomSchema.pre('save', function(next) {
+  if (this.beds && Array.isArray(this.beds) && this.beds.length > 0) {
+    const occupied = this.beds.filter(b => b.isOccupied && b.tenantId);
+    this.occupiedBeds = occupied.length;
+    this.tenants = occupied.map(b => b.tenantId);
+  }
+
+  if (this.occupiedBeds > this.capacity) {
+    this.occupiedBeds = this.capacity;
+  }
+
+  // Clear semantics: maintenance is manual; available vs occupied is calculated automatically
   if (this.status !== 'maintenance') {
     if (this.occupiedBeds >= this.capacity) {
       this.status = 'occupied';
@@ -72,8 +83,8 @@ roomSchema.pre('save', function(next) {
       this.status = 'available';
     }
   }
+
   next();
 });
 
 export default mongoose.models.Room || mongoose.model('Room', roomSchema);
-

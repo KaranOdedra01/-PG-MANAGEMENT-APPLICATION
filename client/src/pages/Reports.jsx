@@ -1,8 +1,8 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import { 
   FileText, 
   TrendingUp, 
@@ -101,7 +101,7 @@ export const Reports = () => {
       doc.setFont('helvetica', 'bold');
       doc.text('Summary: Total Revenue Rs. ' + (summary?.financials?.totalRevenue || 0).toLocaleString() + ' | Expenses Rs. ' + (summary?.financials?.totalExpenses || 0).toLocaleString() + ' | Net Profit Rs. ' + (summary?.financials?.netProfit || 0).toLocaleString(), 15, startY);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: startY + 8,
         head: [['#', 'Month', 'Resident', 'Room', 'Total Amount', 'Status', 'Mode']],
         body: tableData,
@@ -127,7 +127,7 @@ export const Reports = () => {
       doc.setFont('helvetica', 'bold');
       doc.text('Summary: Total Capacity ' + (summary?.occupancy?.totalBeds || 0) + ' Beds | Occupied ' + (summary?.occupancy?.occupiedBeds || 0) + ' (' + (summary?.occupancy?.occupancyRate || 0) + '% Occupancy)', 15, startY);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: startY + 8,
         head: [['#', 'Room', 'Floor', 'Type', 'Capacity', 'Occupied', 'Vacant', 'Occupancy %']],
         body: tableData,
@@ -146,7 +146,7 @@ export const Reports = () => {
         c.assignedTo || 'Unassigned'
       ]);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: startY + 5,
         head: [['#', 'Ticket Title', 'Category', 'Room', 'Priority', 'Status', 'Staff']],
         body: tableData,
@@ -165,7 +165,7 @@ export const Reports = () => {
         v.status.toUpperCase()
       ]);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: startY + 5,
         head: [['#', 'Visitor Name', 'Phone', 'Type', 'Room', 'Entry Time', 'Status']],
         body: tableData,
@@ -175,7 +175,7 @@ export const Reports = () => {
       });
     }
 
-    const finalY = doc.lastAutoTable.finalY + 25;
+    const finalY = (doc.lastAutoTable?.finalY || 140) + 25;
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     doc.text('This is an authorized system-generated administrative audit statement.', 15, finalY);

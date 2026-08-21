@@ -3,14 +3,19 @@ import Tenant from '../models/Tenant.js';
 import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { withTransaction } from '../utils/transaction.js';
 
-// @desc    Get Invoices (Admin/Staff gets all with filters, Tenant gets only own)
+// @desc    Get Invoices with Pagination, Search & Role Protection
 // @route   GET /api/invoices
 // @access  Private
 export const getInvoices = async (req, res) => {
   try {
     const role = req.user.role;
     const { status, month, search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
     const query = {};
 
     // IDOR Protection: Tenants can ONLY see their own invoices
@@ -35,12 +40,21 @@ export const getInvoices = async (req, res) => {
       ];
     }
 
-    const invoices = await Invoice.find(query).sort({ dueDate: -1, createdAt: -1 });
+    const total = await Invoice.countDocuments(query);
+    const invoices = await Invoice.find(query)
+      .sort({ dueDate: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.json({
       success: true,
-      count: invoices.length,
-      data: invoices
+      data: invoices,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -102,11 +116,17 @@ export const createInvoice = async (req, res) => {
     if (tenantUser) {
       tenantName = tenantUser.name;
       roomNumber = tenantUser.roomNumber || '101';
-      targetUserId = tenantUser._id || tenantUser.userId;
+      targetUserId = tenantUser._id;
+    } else {
+      const tRecord = await Tenant.findById(tenantId);
+      if (tRecord) {
+        tenantName = tRecord.name;
+        roomNumber = tRecord.roomNumber;
+        targetUserId = tRecord.userId;
+      }
     }
 
-    // Server-side calculation
-    const totalAmount = Math.max(0, 
+    const calculatedTotal = Math.max(0, 
       Number(baseRent) + 
       Number(electricityCharge) + 
       Number(maintenanceFee) + 
@@ -126,19 +146,18 @@ export const createInvoice = async (req, res) => {
       messFee: Number(messFee),
       lateFee: Number(lateFee),
       discount: Number(discount),
-      totalAmount,
+      totalAmount: calculatedTotal,
       status: 'pending',
-      dueDate: new Date(dueDate),
+      dueDate: dueDate ? new Date(dueDate) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       paidDate: null,
       paymentMode: 'Pending'
     });
 
-    // In-app Notification for tenant
     await Notification.create({
       recipient: targetUserId,
       type: 'invoice',
-      title: `New Rent Invoice for ${month}`,
-      message: `Invoice of ₹${totalAmount.toLocaleString()} generated for Room #${roomNumber}. Due date: ${new Date(dueDate).toLocaleDateString()}.`,
+      title: `New Rent Invoice: ${month}`,
+      message: `Rent invoice #${invoice.invoiceNumber || invoice._id} for ${month} of ₹${calculatedTotal.toLocaleString()} has been generated. Due date: ${new Date(invoice.dueDate).toLocaleDateString()}.`,
       link: '/invoices'
     });
 
@@ -147,7 +166,7 @@ export const createInvoice = async (req, res) => {
       action: 'CREATE_INVOICE',
       entity: 'Invoice',
       entityId: invoice._id,
-      description: `Created invoice ${invoice.invoiceNumber || invoice._id} for ${tenantName} (₹${totalAmount})`
+      description: `Created invoice ${invoice.invoiceNumber || invoice._id} for ${tenantName} (₹${calculatedTotal})`
     });
 
     return res.status(201).json({
@@ -173,7 +192,7 @@ export const generateMonthlyInvoices = async (req, res) => {
       dueDate 
     } = req.body;
 
-    const activeTenants = await Tenant.find({ status: 'active' });
+    const activeTenants = await Tenant.find({ status: 'active', isActive: true });
     if (activeTenants.length === 0) {
       return res.status(400).json({ success: false, message: 'No active tenants found to bill' });
     }
@@ -237,24 +256,40 @@ export const generateMonthlyInvoices = async (req, res) => {
   }
 };
 
-// @desc    Record Invoice Payment
+// @desc    Record Invoice Payment (Offline, UPI, Cash, Bank Transfer)
 // @route   PATCH /api/invoices/:id/pay
-// @access  Private (Admin, Staff, or Tenant)
+// @access  Private (Admin, Staff, or Invoice Owner)
 export const recordPayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { paymentMode = 'UPI', transactionId = '' } = req.body;
+    const { paymentMode = 'UPI', transactionId = '', amountPaid } = req.body;
 
     const invoice = await Invoice.findById(id);
     if (!invoice) {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
 
+    // Ownership check
     if (req.user.role === 'tenant' && invoice.tenantId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ success: false, message: 'Cannot record payment for another tenant\'s invoice' });
     }
 
-    invoice.status = 'paid';
+    if (invoice.status === 'paid') {
+      return res.status(400).json({ success: false, message: 'This invoice has already been fully paid' });
+    }
+
+    // Payment status calculation
+    const paidAmount = amountPaid !== undefined ? Number(amountPaid) : invoice.totalAmount;
+    if (paidAmount < 0) {
+      return res.status(400).json({ success: false, message: 'Payment amount cannot be negative' });
+    }
+
+    if (paidAmount >= invoice.totalAmount) {
+      invoice.status = 'paid';
+    } else {
+      invoice.status = 'partially_paid';
+    }
+
     invoice.paidDate = new Date();
     invoice.paymentMode = paymentMode;
     invoice.transactionId = transactionId || (`TXN-${Date.now()}`);
@@ -263,8 +298,8 @@ export const recordPayment = async (req, res) => {
     await Notification.create({
       recipient: invoice.tenantId,
       type: 'payment',
-      title: 'Payment Received!',
-      message: `Your payment of ₹${invoice.totalAmount.toLocaleString()} for ${invoice.month} was successfully recorded via ${paymentMode}.`,
+      title: 'Payment Recorded!',
+      message: `Your payment of ₹${paidAmount.toLocaleString()} for ${invoice.month} was recorded via ${paymentMode}. Status: ${invoice.status.toUpperCase()}.`,
       link: '/invoices'
     });
 
@@ -273,12 +308,12 @@ export const recordPayment = async (req, res) => {
       action: 'RECORD_PAYMENT',
       entity: 'Invoice',
       entityId: invoice._id,
-      description: `Payment of ₹${invoice.totalAmount} recorded for ${invoice.tenantName} (${paymentMode})`
+      description: `Payment of ₹${paidAmount} recorded for ${invoice.tenantName} (${paymentMode})`
     });
 
     return res.json({
       success: true,
-      message: `Payment of ₹${invoice.totalAmount.toLocaleString()} recorded successfully via ${paymentMode}`,
+      message: `Payment of ₹${paidAmount.toLocaleString()} recorded successfully via ${paymentMode}`,
       data: invoice
     });
   } catch (error) {

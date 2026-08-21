@@ -2,12 +2,16 @@ import Expense from '../models/Expense.js';
 import Invoice from '../models/Invoice.js';
 import { logActivity } from '../utils/activityLogger.js';
 
-// @desc    Get all expenses with filter & search
+// @desc    Get all expenses with Pagination, Filters & Search
 // @route   GET /api/expenses
 // @access  Private (Admin & Staff)
 export const getExpenses = async (req, res) => {
   try {
     const { category, search, month } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
     const query = {};
 
     if (category && category !== 'all') {
@@ -24,7 +28,6 @@ export const getExpenses = async (req, res) => {
     }
 
     if (month && month !== 'all') {
-      // Month could be e.g. "August" or "2026-08"
       const date = new Date(month);
       if (!isNaN(date.getTime())) {
         const start = new Date(date.getFullYear(), date.getMonth(), 1);
@@ -33,31 +36,51 @@ export const getExpenses = async (req, res) => {
       }
     }
 
-    const expenses = await Expense.find(query).sort({ date: -1, createdAt: -1 });
+    const total = await Expense.countDocuments(query);
+    const expenses = await Expense.find(query)
+      .sort({ date: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.json({
       success: true,
-      count: expenses.length,
-      data: expenses
+      data: expenses,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get P&L Financial Summary (Revenue vs Expenses)
+// @desc    Get P&L Financial Summary (MongoDB Aggregations)
 // @route   GET /api/expenses/summary
 // @access  Private (Admin Only)
 export const getExpenseSummary = async (req, res) => {
   try {
-    const expenses = await Expense.find();
-    const paidInvoices = await Invoice.find({ status: 'paid' });
+    // 1. Revenue Aggregation
+    const [revAgg] = await Invoice.aggregate([
+      { $match: { status: 'paid' } },
+      { $group: { _id: null, totalRevenue: { $sum: '$totalAmount' } } }
+    ]);
+    const totalRevenue = revAgg?.totalRevenue || 0;
 
-    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalRevenue = paidInvoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0);
-    const netProfit = totalRevenue - totalExpenses;
-    const profitMargin = totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(1)) : 0;
+    // 2. Expense Category Aggregation
+    const categoryAgg = await Expense.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
+    let totalExpenses = 0;
     const categoryTotals = {
       electricity: 0,
       water: 0,
@@ -70,14 +93,19 @@ export const getExpenseSummary = async (req, res) => {
       other: 0
     };
 
-    expenses.forEach(e => {
-      const cat = e.category?.toLowerCase() || 'other';
+    categoryAgg.forEach(item => {
+      const cat = item._id?.toLowerCase() || 'other';
+      totalExpenses += item.totalAmount;
       if (categoryTotals[cat] !== undefined) {
-        categoryTotals[cat] += e.amount;
+        categoryTotals[cat] += item.totalAmount;
       } else {
-        categoryTotals.other = (categoryTotals.other || 0) + e.amount;
+        categoryTotals.other = (categoryTotals.other || 0) + item.totalAmount;
       }
     });
+
+    const netProfit = totalRevenue - totalExpenses;
+    const profitMargin = totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(1)) : 0;
+    const expenseCount = await Expense.countDocuments();
 
     return res.json({
       success: true,
@@ -87,7 +115,7 @@ export const getExpenseSummary = async (req, res) => {
         netProfit,
         profitMargin,
         categoryTotals,
-        expenseCount: expenses.length
+        expenseCount
       }
     });
   } catch (error) {

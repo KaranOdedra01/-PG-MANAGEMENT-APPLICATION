@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import { validateEnv, config } from './config/env.js';
 import { connectDB } from './config/db.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -20,51 +20,51 @@ import reportRoutes from './routes/reportRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 
-dotenv.config();
-
-// Environment Validation
-if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  console.error('FATAL: JWT_SECRET environment variable must be set in production!');
-  process.exit(1);
-}
-
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // Security & Utility Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// Environment-based CORS
-const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
+// Strict Environment-Based CORS Allowlist
+const rawOrigins = [
+  config.clientUrl,
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  'http://localhost:3000'
+  'http://localhost:3000',
+  'http://127.0.0.1:3000'
 ];
+
+const allowedOrigins = rawOrigins
+  .flatMap(url => (url ? url.split(',').map(s => s.trim().replace(/\/$/, '')) : []))
+  .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, curl, Postman)
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps, curl, server-side tests)
+    if (!origin) {
       return callback(null, true);
     }
-    return callback(null, true); // Permissive in local dev, restricted in prod
+    const cleanOrigin = origin.replace(/\/$/, '');
+    if (allowedOrigins.includes(cleanOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS Error: Origin ${origin} not allowed by Access-Control-Allow-Origin policy`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+app.use(morgan(config.nodeEnv === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate Limiting
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30, // Limit each IP to 30 auth requests per window
+  max: 30, // 30 requests per window
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -75,7 +75,7 @@ const authLimiter = rateLimit({
 
 const aiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 AI prompts per minute
+  max: 30, // 30 prompts per minute
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -117,9 +117,9 @@ app.get('/api/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     service: 'PG Management System API v2.0',
-    environment: process.env.NODE_ENV || 'development',
+    environment: config.nodeEnv,
     database: 'MongoDB',
-    geminiEnabled: !!process.env.GEMINI_API_KEY
+    geminiEnabled: !!config.geminiApiKey
   });
 });
 
@@ -161,9 +161,17 @@ app.use((req, res) => {
 
 // Global Centralized Error Handler
 app.use((err, req, res, next) => {
+  // Check for CORS error
+  if (err.message && err.message.includes('CORS Error')) {
+    return res.status(403).json({
+      success: false,
+      message: err.message
+    });
+  }
+
   const statusCode = err.statusCode || (res.statusCode === 200 ? 500 : res.statusCode);
   
-  if (process.env.NODE_ENV !== 'production') {
+  if (config.nodeEnv !== 'production') {
     console.error('Unhandled Error:', err.stack || err.message);
   }
 
@@ -171,15 +179,26 @@ app.use((err, req, res, next) => {
     success: false,
     message: err.message || 'Internal Server Error',
     errors: err.errors || undefined,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+    ...(config.nodeEnv !== 'production' && { stack: err.stack })
   });
 });
 
+export const startServer = async () => {
+  try {
+    validateEnv();
+    await connectDB();
+    const server = app.listen(config.port, () => {
+      console.log(`🚀 PG Management Server running on http://localhost:${config.port}`);
+    });
+    return server;
+  } catch (error) {
+    console.error('❌ Server startup aborted due to critical error:', error.message);
+    process.exit(1);
+  }
+};
+
 export default app;
 
-if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`🚀 PG Management Server running on http://localhost:${PORT}`);
-    connectDB().catch(err => console.log('DB Note:', err.message));
-  });
+if (process.env.NODE_ENV !== 'test' && config.nodeEnv !== 'test') {
+  startServer();
 }

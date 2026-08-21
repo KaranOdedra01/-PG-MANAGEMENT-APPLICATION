@@ -10,30 +10,80 @@ import Visitor from '../models/Visitor.js';
 // @access  Private (Admin Only)
 export const getExecutiveSummary = async (req, res) => {
   try {
-    const rooms = await Room.find();
-    const totalBeds = rooms.reduce((sum, r) => sum + (r.capacity || 0), 0);
-    const occupiedBeds = rooms.reduce((sum, r) => sum + (r.occupiedBeds || 0), 0);
+    // 1. Room Occupancy Aggregation Pipeline
+    const [roomAgg] = await Room.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalRooms: { $sum: 1 },
+          totalBeds: { $sum: '$capacity' },
+          occupiedBeds: { $sum: '$occupiedBeds' }
+        }
+      }
+    ]);
+
+    const totalRooms = roomAgg?.totalRooms || 0;
+    const totalBeds = roomAgg?.totalBeds || 0;
+    const occupiedBeds = roomAgg?.occupiedBeds || 0;
+    const availableBeds = Math.max(0, totalBeds - occupiedBeds);
     const occupancyRate = totalBeds > 0 ? Number(((occupiedBeds / totalBeds) * 100).toFixed(1)) : 0;
 
-    const invoices = await Invoice.find();
-    const totalRevenue = invoices
-      .filter(i => i.status === 'paid')
-      .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+    // 2. Invoices Financial Aggregation Pipeline
+    const invoiceAgg = await Invoice.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          totalAmount: { $sum: '$totalAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
-    const pendingDues = invoices
-      .filter(i => i.status !== 'paid')
-      .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+    let totalRevenue = 0;
+    let pendingDues = 0;
+    invoiceAgg.forEach(item => {
+      if (item._id === 'paid') {
+        totalRevenue += item.totalAmount;
+      } else {
+        pendingDues += item.totalAmount;
+      }
+    });
 
-    const expenses = await Expense.find();
-    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    // 3. Expenses Aggregation Pipeline
+    const [expenseAgg] = await Expense.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalExpenses: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalExpenses = expenseAgg?.totalExpenses || 0;
     const netProfit = totalRevenue - totalExpenses;
     const profitMargin = totalRevenue > 0 ? Number(((netProfit / totalRevenue) * 100).toFixed(1)) : 0;
 
-    const complaints = await Complaint.find();
-    const totalComplaints = complaints.length;
-    const resolvedComplaints = complaints.filter(c => c.status === 'resolved' || c.status === 'closed').length;
+    // 4. Complaints Aggregation Pipeline
+    const complaintAgg = await Complaint.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    let totalComplaints = 0;
+    let resolvedComplaints = 0;
+    complaintAgg.forEach(c => {
+      totalComplaints += c.count;
+      if (c._id === 'resolved' || c._id === 'closed') {
+        resolvedComplaints += c.count;
+      }
+    });
     const resolutionRate = totalComplaints > 0 ? Number(((resolvedComplaints / totalComplaints) * 100).toFixed(1)) : 100;
 
+    // 5. Operations Count
     const activeTenants = await Tenant.countDocuments({ status: 'active' });
     const totalVisitorsLogged = await Visitor.countDocuments();
 
@@ -41,10 +91,10 @@ export const getExecutiveSummary = async (req, res) => {
       success: true,
       data: {
         occupancy: {
-          totalRooms: rooms.length,
+          totalRooms,
           totalBeds,
           occupiedBeds,
-          availableBeds: Math.max(0, totalBeds - occupiedBeds),
+          availableBeds,
           occupancyRate
         },
         financials: {
@@ -68,20 +118,51 @@ export const getExecutiveSummary = async (req, res) => {
   }
 };
 
-// @desc    Get Detailed Financial P&L Statement
+// @desc    Get Detailed Financial P&L Statement (MongoDB Aggregations)
 // @route   GET /api/reports/financial
 // @access  Private (Admin Only)
 export const getFinancialReport = async (req, res) => {
   try {
-    const invoices = await Invoice.find().sort({ createdAt: -1 });
-    const expenses = await Expense.find().sort({ date: -1 });
+    // 1. Revenue by Month Aggregation
+    const monthlyRevenue = await Invoice.aggregate([
+      { $match: { status: 'paid' } },
+      {
+        $group: {
+          _id: '$month',
+          revenue: { $sum: '$totalAmount' },
+          invoiceCount: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
 
-    const totalRevenue = invoices
-      .filter(i => i.status === 'paid')
-      .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+    // 2. Expenses by Category Aggregation
+    const expensesByCategory = await Expense.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { totalAmount: -1 } }
+    ]);
 
-    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    // 3. Totals
+    const [revTotal] = await Invoice.aggregate([
+      { $match: { status: 'paid' } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    ]);
+    const [expTotal] = await Expense.aggregate([
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+
+    const totalRevenue = revTotal?.total || 0;
+    const totalExpenses = expTotal?.total || 0;
     const netProfit = totalRevenue - totalExpenses;
+
+    const invoices = await Invoice.find().sort({ createdAt: -1 }).limit(50);
+    const expenses = await Expense.find().sort({ date: -1 }).limit(50);
 
     return res.json({
       success: true,
@@ -89,6 +170,8 @@ export const getFinancialReport = async (req, res) => {
         totalRevenue,
         totalExpenses,
         netProfit,
+        monthlyRevenue,
+        expensesByCategory,
         invoices,
         expenses
       }
@@ -98,13 +181,26 @@ export const getFinancialReport = async (req, res) => {
   }
 };
 
-// @desc    Get Occupancy & Bed Utilization Audit
+// @desc    Get Occupancy & Bed Utilization Audit (MongoDB Aggregations)
 // @route   GET /api/reports/occupancy
 // @access  Private (Admin Only)
 export const getOccupancyReport = async (req, res) => {
   try {
+    // Floor-wise Occupancy Pipeline
+    const floorOccupancy = await Room.aggregate([
+      {
+        $group: {
+          _id: '$floor',
+          totalRooms: { $sum: 1 },
+          totalCapacity: { $sum: '$capacity' },
+          occupiedBeds: { $sum: '$occupiedBeds' }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
     const rooms = await Room.find().sort({ floor: 1, roomNumber: 1 });
-    const tenants = await Tenant.find({ status: 'active' });
+    const tenants = await Tenant.find({ status: 'active' }).populate('roomId', 'roomNumber type');
 
     const roomBreakdown = rooms.map(r => {
       const rate = r.capacity > 0 ? Math.round(((r.occupiedBeds || 0) / r.capacity) * 100) : 0;
@@ -124,6 +220,7 @@ export const getOccupancyReport = async (req, res) => {
     return res.json({
       success: true,
       data: {
+        floorOccupancy,
         rooms: roomBreakdown,
         tenants
       }

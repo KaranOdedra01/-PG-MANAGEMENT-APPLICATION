@@ -1,8 +1,8 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import { 
   Receipt, DollarSign, Download, CheckCircle2, Clock, AlertCircle, 
   Search, Plus, Layers, Calendar, CreditCard, User, DoorOpen, 
@@ -191,7 +191,7 @@ export const Invoices = () => {
       ['', 'TOTAL AMOUNT PAID', 'Rs. ' + (inv.totalAmount ? inv.totalAmount.toLocaleString() : '0')]
     ];
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 85,
       head: [['#', 'Item Description', 'Amount (INR)']],
       body: tableData,
@@ -205,7 +205,7 @@ export const Invoices = () => {
       }
     });
 
-    const finalY = doc.lastAutoTable.finalY + 25;
+    const finalY = (doc.lastAutoTable?.finalY || 140) + 25;
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     doc.text('This is an authorized system-generated receipt.', 15, finalY);

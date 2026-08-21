@@ -1,13 +1,18 @@
 import Visitor from '../models/Visitor.js';
-import User from '../models/User.js';
+import Tenant from '../models/Tenant.js';
+import Room from '../models/Room.js';
 import { logActivity } from '../utils/activityLogger.js';
 
-// @desc    Get all visitor logs
+// @desc    Get all visitor logs with Pagination & Search
 // @route   GET /api/visitors
 // @access  Private (Admin & Staff)
 export const getVisitors = async (req, res) => {
   try {
     const { status, type, search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
     const query = {};
 
     if (status && status !== 'all') {
@@ -27,12 +32,21 @@ export const getVisitors = async (req, res) => {
       ];
     }
 
-    const visitors = await Visitor.find(query).sort({ entryTime: -1 });
+    const total = await Visitor.countDocuments(query);
+    const visitors = await Visitor.find(query)
+      .sort({ entryTime: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.json({
       success: true,
-      count: visitors.length,
-      data: visitors
+      data: visitors,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1
+      }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -60,7 +74,7 @@ export const getActiveVisitors = async (req, res) => {
   }
 };
 
-// @desc    Check-in New Visitor
+// @desc    Check-in New Visitor with Strict Host Verification
 // @route   POST /api/visitors
 // @access  Private (Admin & Staff)
 export const checkinVisitor = async (req, res) => {
@@ -70,24 +84,32 @@ export const checkinVisitor = async (req, res) => {
     const currentHour = new Date().getHours();
     const isLate = currentHour >= 21 || currentHour < 6; // 9:00 PM to 6:00 AM
 
-    // Find host tenant if available
-    let hostTenantId = null;
-    let hostName = tenantName;
-    if (roomNumber) {
-      const hostUser = await User.findOne({ roomNumber: roomNumber.trim(), role: 'tenant' });
-      if (hostUser) {
-        hostTenantId = hostUser._id;
-        if (!hostName) hostName = hostUser.name;
-      }
+    // 1. Authoritative Room & Host Tenant Verification
+    const roomExists = await Room.findOne({ roomNumber: roomNumber.trim().toUpperCase() });
+    if (!roomExists) {
+      return res.status(400).json({
+        success: false,
+        message: `Room #${roomNumber} does not exist in the hostel`
+      });
     }
+
+    // Verify active tenant in that room
+    const hostTenant = await Tenant.findOne({ 
+      roomNumber: roomNumber.trim().toUpperCase(), 
+      status: 'active',
+      isActive: true 
+    });
+
+    let hostTenantId = hostTenant ? hostTenant.userId : null;
+    let resolvedHostName = hostTenant ? hostTenant.name : (tenantName || `Resident of Room #${roomNumber}`);
 
     const visitor = await Visitor.create({
       name: name.trim(),
       phone: phone.trim(),
       visitorType,
       tenantId: hostTenantId,
-      tenantName: hostName || `Resident of Room #${roomNumber}`,
-      roomNumber: roomNumber.trim(),
+      tenantName: resolvedHostName,
+      roomNumber: roomNumber.trim().toUpperCase(),
       purpose: purpose.trim(),
       vehicleNumber: vehicleNumber ? vehicleNumber.trim() : '',
       entryTime: new Date(),
@@ -102,7 +124,7 @@ export const checkinVisitor = async (req, res) => {
       action: 'CHECKIN_VISITOR',
       entity: 'Visitor',
       entityId: visitor._id,
-      description: `Visitor ${visitor.name} checked in to visit Room #${visitor.roomNumber}`
+      description: `Visitor ${visitor.name} checked in to visit Room #${visitor.roomNumber} (${resolvedHostName})`
     });
 
     return res.status(201).json({

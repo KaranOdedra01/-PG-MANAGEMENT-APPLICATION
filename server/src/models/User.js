@@ -55,6 +55,10 @@ const userSchema = new mongoose.Schema({
     type: Boolean, 
     default: true 
   },
+  mustChangePassword: {
+    type: Boolean,
+    default: false
+  },
   emergencyContact: {
     name: { type: String, default: '' },
     phone: { type: String, default: '' },
@@ -82,4 +86,3 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 export default mongoose.models.User || mongoose.model('User', userSchema);
-

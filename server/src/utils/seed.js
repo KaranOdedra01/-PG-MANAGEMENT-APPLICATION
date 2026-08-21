@@ -9,13 +9,24 @@ import Invoice from '../models/Invoice.js';
 import Expense from '../models/Expense.js';
 import Complaint from '../models/Complaint.js';
 import Notice from '../models/Notice.js';
-import { MessMenu, MealSubscription } from '../models/Mess.js';
+import { MessMenu, MealSubscription, MealAttendance } from '../models/Mess.js';
+import PGSettings from '../models/PGSettings.js';
 import Visitor from '../models/Visitor.js';
 import ActivityLog from '../models/ActivityLog.js';
+import Notification from '../models/Notification.js';
 
 dotenv.config();
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/pg_management';
+
+const getTodayDateString = (offsetDays = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export const seedDatabase = async () => {
   try {
@@ -34,13 +45,44 @@ export const seedDatabase = async () => {
     await Notice.deleteMany({});
     await MessMenu.deleteMany({});
     await MealSubscription.deleteMany({});
+    await MealAttendance.deleteMany({});
+    await PGSettings.deleteMany({});
     await Visitor.deleteMany({});
     await ActivityLog.deleteMany({});
+    await Notification.deleteMany({});
 
     // 2. Hash default password
     const defaultPassword = 'Password@123';
 
-    // 3. Create Users
+    // 3. Seed PG Settings
+    console.log('⚙️ Creating PG Settings...');
+    await PGSettings.create({
+      hostelName: 'Greenwood Executive PG & Student Living',
+      address: 'Plot 42, Infocity Road, Gandhinagar, Gujarat - 382007',
+      gateOpeningTime: '06:00 AM',
+      gateClosingTime: '10:30 PM',
+      visitingHoursStart: '10:00 AM',
+      visitingHoursEnd: '08:00 PM',
+      silentHoursStart: '11:00 PM',
+      silentHoursEnd: '06:00 AM',
+      wifiSsid: 'Greenwood_HighSpeed_Fiber_5G',
+      wifiDetails: 'High-speed 300 Mbps fiber internet. Wi-Fi credentials are provided upon room assignment.',
+      emergencyContacts: {
+        police: '112',
+        ambulance: '108',
+        wardenPhone: '+91 98765 43210',
+        nearestHospital: 'Apollo Hospital (1.2 km)'
+      },
+      generalRules: [
+        'Main security gate closes strictly at 10:30 PM.',
+        'Visitors must sign in at the gate and leave premises by 08:00 PM.',
+        'Alcohol, smoking, and contraband items are strictly prohibited inside the hostel.',
+        'Corridor silence hours (11:00 PM - 06:00 AM) must be maintained.',
+        'Raise maintenance requests through the Resident Complaints portal.'
+      ]
+    });
+
+    // 4. Create Users
     console.log('👥 Creating Users...');
     const adminUser = await User.create({
       name: 'Karan Admin',
@@ -48,6 +90,7 @@ export const seedDatabase = async () => {
       password: defaultPassword,
       role: 'admin',
       phone: '+91 98765 43210',
+      mustChangePassword: false,
       emergencyContact: { name: 'Emergency Admin', phone: '+91 99999 88888', relation: 'Partner' }
     });
 
@@ -57,6 +100,7 @@ export const seedDatabase = async () => {
       password: defaultPassword,
       role: 'staff',
       phone: '+91 98333 44455',
+      mustChangePassword: false,
       emergencyContact: { name: 'Geeta', phone: '+91 98333 77777', relation: 'Spouse' }
     });
 
@@ -66,6 +110,7 @@ export const seedDatabase = async () => {
       password: defaultPassword,
       role: 'tenant',
       phone: '+91 98111 22233',
+      mustChangePassword: false,
       emergencyContact: { name: 'Sunil Sharma', phone: '+91 98111 99999', relation: 'Father' }
     });
 
@@ -75,6 +120,7 @@ export const seedDatabase = async () => {
       password: defaultPassword,
       role: 'tenant',
       phone: '+91 98222 33445',
+      mustChangePassword: false,
       emergencyContact: { name: 'Dinesh Patel', phone: '+91 98222 88888', relation: 'Father' }
     });
 
@@ -84,83 +130,73 @@ export const seedDatabase = async () => {
       password: defaultPassword,
       role: 'tenant',
       phone: '+91 98444 55667',
-      emergencyContact: { name: 'Sanjay Verma', phone: '+91 98444 99999', relation: 'Brother' }
+      mustChangePassword: false,
+      emergencyContact: { name: 'Rajesh Verma', phone: '+91 98444 11111', relation: 'Father' }
     });
 
-    // 4. Create Rooms
-    console.log('🛏️ Creating Rooms & Beds...');
+    // 5. Create Rooms with synchronized beds
+    console.log('🛏️ Creating Rooms...');
     const room101 = await Room.create({
       roomNumber: '101',
       floor: 1,
-      type: 'single',
-      capacity: 1,
+      type: 'double',
+      capacity: 2,
       occupiedBeds: 1,
-      rent: 9500,
-      status: 'occupied',
-      amenities: ['AC', 'Attached Bathroom', 'High-Speed WiFi', 'Balcony', 'Study Table'],
-      beds: [{ bedNumber: 'Bed A', isOccupied: true, tenantId: tenant2User._id }],
+      rent: 7500,
+      status: 'available',
+      amenities: ['Attached Bathroom', 'Air Conditioner', 'Study Desk', 'High-Speed Wi-Fi'],
+      beds: [
+        { bedNumber: 'Bed A', isOccupied: true, tenantId: tenant2User._id },
+        { bedNumber: 'Bed B', isOccupied: false, tenantId: null }
+      ],
       tenants: [tenant2User._id]
     });
 
     const room102 = await Room.create({
       roomNumber: '102',
       floor: 1,
-      type: 'double',
-      capacity: 2,
-      occupiedBeds: 2,
-      rent: 7500,
+      type: 'single',
+      capacity: 1,
+      occupiedBeds: 1,
+      rent: 12000,
       status: 'occupied',
-      amenities: ['AC', 'Attached Bathroom', 'High-Speed WiFi', 'Wardrobe'],
+      amenities: ['Balcony', 'Air Conditioner', 'Attached Bathroom', 'Smart TV', 'Wi-Fi'],
       beds: [
-        { bedNumber: 'Bed A', isOccupied: true, tenantId: tenant1User._id },
-        { bedNumber: 'Bed B', isOccupied: true, tenantId: tenant3User._id }
+        { bedNumber: 'Bed A', isOccupied: true, tenantId: tenant1User._id }
       ],
-      tenants: [tenant1User._id, tenant3User._id]
+      tenants: [tenant1User._id]
     });
 
     const room201 = await Room.create({
       roomNumber: '201',
+      floor: 2,
+      type: 'triple',
+      capacity: 3,
+      occupiedBeds: 1,
+      rent: 6000,
+      status: 'available',
+      amenities: ['Attached Washroom', 'Study Desks', 'Wi-Fi', 'Wardrobe'],
+      beds: [
+        { bedNumber: 'Bed A', isOccupied: true, tenantId: tenant3User._id },
+        { bedNumber: 'Bed B', isOccupied: false, tenantId: null },
+        { bedNumber: 'Bed C', isOccupied: false, tenantId: null }
+      ],
+      tenants: [tenant3User._id]
+    });
+
+    const room202 = await Room.create({
+      roomNumber: '202',
       floor: 2,
       type: 'double',
       capacity: 2,
       occupiedBeds: 0,
       rent: 7000,
       status: 'available',
-      amenities: ['Non-AC', 'Attached Bathroom', 'High-Speed WiFi', 'Wardrobe'],
+      amenities: ['Attached Bathroom', 'Air Conditioner', 'Wi-Fi'],
       beds: [
         { bedNumber: 'Bed A', isOccupied: false, tenantId: null },
         { bedNumber: 'Bed B', isOccupied: false, tenantId: null }
       ],
-      tenants: []
-    });
-
-    const room202 = await Room.create({
-      roomNumber: '202',
-      floor: 2,
-      type: 'triple',
-      capacity: 3,
-      occupiedBeds: 0,
-      rent: 5500,
-      status: 'available',
-      amenities: ['AC', 'Attached Bathroom', 'WiFi', 'Balcony'],
-      beds: [
-        { bedNumber: 'Bed A', isOccupied: false, tenantId: null },
-        { bedNumber: 'Bed B', isOccupied: false, tenantId: null },
-        { bedNumber: 'Bed C', isOccupied: false, tenantId: null }
-      ],
-      tenants: []
-    });
-
-    const room203 = await Room.create({
-      roomNumber: '203',
-      floor: 2,
-      type: 'single',
-      capacity: 1,
-      occupiedBeds: 0,
-      rent: 9000,
-      status: 'maintenance',
-      amenities: ['AC', 'Attached Bath', 'WiFi'],
-      beds: [{ bedNumber: 'Bed A', isOccupied: false, tenantId: null }],
       tenants: []
     });
 
@@ -171,8 +207,8 @@ export const seedDatabase = async () => {
       capacity: 4,
       occupiedBeds: 0,
       rent: 4500,
-      status: 'available',
-      amenities: ['Fan', 'Common Bath', 'WiFi', 'Individual Lockers'],
+      status: 'maintenance',
+      amenities: ['Locker', 'Common Bath', 'Fan', 'Wi-Fi'],
       beds: [
         { bedNumber: 'Bed A', isOccupied: false, tenantId: null },
         { bedNumber: 'Bed B', isOccupied: false, tenantId: null },
@@ -182,7 +218,7 @@ export const seedDatabase = async () => {
       tenants: []
     });
 
-    // 5. Update user room references
+    // Link users with their allocated rooms
     tenant1User.roomId = room102._id;
     tenant1User.roomNumber = '102';
     await tenant1User.save();
@@ -191,13 +227,13 @@ export const seedDatabase = async () => {
     tenant2User.roomNumber = '101';
     await tenant2User.save();
 
-    tenant3User.roomId = room102._id;
-    tenant3User.roomNumber = '102';
+    tenant3User.roomId = room201._id;
+    tenant3User.roomNumber = '201';
     await tenant3User.save();
 
     // 6. Create Tenants
-    console.log('📋 Creating Active Tenants...');
-    const t1 = await Tenant.create({
+    console.log('📋 Creating Tenants...');
+    const tenant1 = await Tenant.create({
       userId: tenant1User._id,
       roomId: room102._id,
       roomNumber: '102',
@@ -205,16 +241,17 @@ export const seedDatabase = async () => {
       name: tenant1User.name,
       email: tenant1User.email,
       phone: tenant1User.phone,
-      checkInDate: new Date('2026-02-10'),
-      securityDeposit: 15000,
-      monthlyRent: 7500,
+      checkInDate: new Date('2026-01-15'),
+      securityDeposit: 12000,
+      monthlyRent: 12000,
       idProofType: 'Aadhaar',
-      idProofNumber: 'XXXX-XXXX-4812',
-      emergencyContact: { name: 'Sunil Sharma', phone: '+91 98111 99999', relation: 'Father' },
-      status: 'active'
+      idProofNumber: '8912-3456-7890',
+      emergencyContact: tenant1User.emergencyContact,
+      status: 'active',
+      isActive: true
     });
 
-    const t2 = await Tenant.create({
+    const tenant2 = await Tenant.create({
       userId: tenant2User._id,
       roomId: room101._id,
       roomNumber: '101',
@@ -222,30 +259,32 @@ export const seedDatabase = async () => {
       name: tenant2User.name,
       email: tenant2User.email,
       phone: tenant2User.phone,
-      checkInDate: new Date('2026-03-01'),
-      securityDeposit: 19000,
-      monthlyRent: 9500,
+      checkInDate: new Date('2026-02-01'),
+      securityDeposit: 10000,
+      monthlyRent: 7500,
       idProofType: 'College ID',
-      idProofNumber: 'GUJ-2024-889',
-      emergencyContact: { name: 'Dinesh Patel', phone: '+91 98222 88888', relation: 'Father' },
-      status: 'active'
+      idProofNumber: 'DAIICT-2023-CS-042',
+      emergencyContact: tenant2User.emergencyContact,
+      status: 'active',
+      isActive: true
     });
 
-    const t3 = await Tenant.create({
+    const tenant3 = await Tenant.create({
       userId: tenant3User._id,
-      roomId: room102._id,
-      roomNumber: '102',
-      bedNumber: 'Bed B',
+      roomId: room201._id,
+      roomNumber: '201',
+      bedNumber: 'Bed A',
       name: tenant3User.name,
       email: tenant3User.email,
       phone: tenant3User.phone,
-      checkInDate: new Date('2026-04-12'),
-      securityDeposit: 15000,
-      monthlyRent: 7500,
-      idProofType: 'Aadhaar',
-      idProofNumber: 'XXXX-XXXX-9921',
-      emergencyContact: { name: 'Sanjay Verma', phone: '+91 98444 99999', relation: 'Brother' },
-      status: 'active'
+      checkInDate: new Date('2026-03-10'),
+      securityDeposit: 10000,
+      monthlyRent: 6000,
+      idProofType: 'Passport',
+      idProofNumber: 'P7829103',
+      emergencyContact: tenant3User.emergencyContact,
+      status: 'active',
+      isActive: true
     });
 
     // 7. Create Invoices
@@ -255,16 +294,36 @@ export const seedDatabase = async () => {
       tenantName: tenant1User.name,
       roomNumber: '102',
       month: 'August 2026',
-      baseRent: 7500,
-      electricityCharge: 450,
+      baseRent: 12000,
+      electricityCharge: 650,
       maintenanceFee: 200,
-      messFee: 0,
-      totalAmount: 8150,
+      messFee: 3500,
+      discount: 0,
+      lateFee: 0,
+      totalAmount: 16350,
       status: 'paid',
       dueDate: new Date('2026-08-05'),
       paidDate: new Date('2026-08-03'),
       paymentMode: 'UPI',
-      transactionId: 'UPI-AUG-102938'
+      transactionId: 'UPI-8921-X992-01'
+    });
+
+    await Invoice.create({
+      tenantId: tenant1User._id,
+      tenantName: tenant1User.name,
+      roomNumber: '102',
+      month: 'September 2026',
+      baseRent: 12000,
+      electricityCharge: 550,
+      maintenanceFee: 200,
+      messFee: 3500,
+      discount: 0,
+      lateFee: 0,
+      totalAmount: 16250,
+      status: 'pending',
+      dueDate: new Date('2026-09-05'),
+      paidDate: null,
+      paymentMode: 'Pending'
     });
 
     await Invoice.create({
@@ -272,80 +331,94 @@ export const seedDatabase = async () => {
       tenantName: tenant2User.name,
       roomNumber: '101',
       month: 'August 2026',
-      baseRent: 9500,
-      electricityCharge: 600,
+      baseRent: 7500,
+      electricityCharge: 450,
       maintenanceFee: 200,
-      messFee: 0,
-      totalAmount: 10300,
+      messFee: 3500,
+      discount: 500,
+      lateFee: 0,
+      totalAmount: 11150,
       status: 'paid',
       dueDate: new Date('2026-08-05'),
       paidDate: new Date('2026-08-04'),
       paymentMode: 'Bank Transfer',
-      transactionId: 'NEFT-88392019'
+      transactionId: 'NEFT-AXIS-20260804'
     });
 
     await Invoice.create({
       tenantId: tenant3User._id,
       tenantName: tenant3User.name,
-      roomNumber: '102',
+      roomNumber: '201',
       month: 'August 2026',
-      baseRent: 7500,
-      electricityCharge: 450,
+      baseRent: 6000,
+      electricityCharge: 400,
       maintenanceFee: 200,
-      messFee: 0,
-      totalAmount: 8150,
-      status: 'pending',
-      dueDate: new Date('2026-08-10'),
+      messFee: 2800,
+      discount: 0,
+      lateFee: 250,
+      totalAmount: 9650,
+      status: 'overdue',
+      dueDate: new Date('2026-08-05'),
       paidDate: null,
       paymentMode: 'Pending'
     });
 
-    // 8. Create Operating Expenses
-    console.log('💰 Creating Operating Expenses...');
+    // 8. Create Expenses
+    console.log('🧾 Creating Expenses...');
     await Expense.create({
       category: 'electricity',
-      amount: 14200,
-      description: 'Main Building Electricity Bill (Torrent Power) - July',
+      amount: 8500,
+      description: 'Hostel Main Electric Meter Bill - UGVCL July-August',
       date: new Date('2026-08-02'),
       paymentMode: 'Bank Transfer',
-      receiptRef: 'EB-2026-07-889',
+      receiptRef: 'EBILL-881923',
       addedBy: 'Karan Admin'
     });
 
     await Expense.create({
-      category: 'salary',
-      amount: 18000,
-      description: 'Staff & Caretaker monthly salary',
+      category: 'groceries',
+      amount: 14200,
+      description: 'Monthly ration, rice, pulses, and cooking oil for mess',
+      date: new Date('2026-08-04'),
+      paymentMode: 'UPI',
+      receiptRef: 'DMART-2026-0804',
+      addedBy: 'Ramesh Caretaker'
+    });
+
+    await Expense.create({
+      category: 'internet',
+      amount: 2499,
+      description: 'Airtel Broadband 300 Mbps Multi-AP Plan',
       date: new Date('2026-08-01'),
       paymentMode: 'Bank Transfer',
-      receiptRef: 'SAL-AUG-01',
+      receiptRef: 'AIRTEL-BILL-0826',
       addedBy: 'Karan Admin'
     });
 
     await Expense.create({
-      category: 'water',
-      amount: 3200,
-      description: 'Water filtration & RO membrane replacement',
-      date: new Date('2026-08-10'),
-      paymentMode: 'UPI',
-      receiptRef: 'RO-FLT-2026',
-      addedBy: 'Karan Admin'
+      category: 'maintenance',
+      amount: 1800,
+      description: 'Plumber fees for fixing 2nd floor bathroom leakage',
+      date: new Date('2026-08-08'),
+      paymentMode: 'Cash',
+      receiptRef: 'VOUCHER-044',
+      addedBy: 'Ramesh Caretaker'
     });
 
     // 9. Create Complaints
-    console.log('🛠️ Creating Complaints...');
+    console.log('🔧 Creating Complaints...');
     await Complaint.create({
       tenantId: tenant1User._id,
       tenantName: tenant1User.name,
       roomNumber: '102',
-      title: 'AC cooling issue in Room 102',
-      description: 'The split AC is blowing normal room air and not cooling properly.',
+      title: 'Geyser not heating properly',
+      description: 'Bathroom geyser takes more than 30 minutes to warm up water. Needs heating element check.',
       category: 'electrical',
       priority: 'high',
-      status: 'in-progress',
-      assignedTo: 'Suresh Electrician',
-      assignedAt: new Date('2026-08-18T11:00:00'),
-      resolutionNote: 'Inspecting gas level and capacitor'
+      status: 'assigned',
+      assignedTo: 'Ramesh Caretaker',
+      assignedStaffId: staffUser._id,
+      assignedAt: new Date()
     });
 
     await Complaint.create({
@@ -422,7 +495,7 @@ export const seedDatabase = async () => {
         breakfast: 'Bread Omelette / Veg Cheese Toast, Tea/Coffee',
         lunch: 'Dal Fry, Sev Tameta Nu Shaak, Rice, Phulka Roti, Salad',
         snacks: 'Vada Pav with Fried Green Chillies',
-        dinner: 'Veg Biryani / Chicken Biryani, Veg Raita, Salan, Ice Cream',
+        dinner: 'Veg Biryani / Paneer Biryani, Veg Raita, Salan, Ice Cream',
         specialNote: 'Biryani Night'
       },
       {
@@ -447,13 +520,14 @@ export const seedDatabase = async () => {
       await MessMenu.create(m);
     }
 
-    // 12. Create Meal Subscriptions
+    // 12. Create Meal Subscriptions & Date-Specific Attendance
+    console.log('🍲 Creating Meal Subscriptions & Attendance...');
     await MealSubscription.create({
       userId: tenant1User._id,
       plan: 'full',
       monthlyCharge: 3500,
       diet: 'Vegetarian',
-      attendance: { breakfast: true, lunch: true, dinner: true }
+      isActive: true
     });
 
     await MealSubscription.create({
@@ -461,7 +535,7 @@ export const seedDatabase = async () => {
       plan: 'full',
       monthlyCharge: 3500,
       diet: 'Vegetarian',
-      attendance: { breakfast: true, lunch: true, dinner: true }
+      isActive: true
     });
 
     await MealSubscription.create({
@@ -469,8 +543,21 @@ export const seedDatabase = async () => {
       plan: '2-meal',
       monthlyCharge: 2800,
       diet: 'Eggetarian',
-      attendance: { breakfast: true, lunch: false, dinner: true }
+      isActive: true
     });
+
+    // Date-specific attendance for today & yesterday
+    const todayStr = getTodayDateString(0);
+    const yesterdayStr = getTodayDateString(-1);
+
+    await MealAttendance.create([
+      { userId: tenant1User._id, date: todayStr, breakfast: true, lunch: true, dinner: true },
+      { userId: tenant2User._id, date: todayStr, breakfast: true, lunch: true, dinner: false },
+      { userId: tenant3User._id, date: todayStr, breakfast: true, lunch: false, dinner: true },
+      { userId: tenant1User._id, date: yesterdayStr, breakfast: true, lunch: true, dinner: true },
+      { userId: tenant2User._id, date: yesterdayStr, breakfast: true, lunch: true, dinner: true },
+      { userId: tenant3User._id, date: yesterdayStr, breakfast: true, lunch: false, dinner: true }
+    ]);
 
     // 13. Create Visitors
     console.log('🚪 Creating Visitor Logs...');
@@ -526,7 +613,7 @@ export const seedDatabase = async () => {
       actor: { userId: tenant1User._id, name: tenant1User.name, role: 'tenant' },
       action: 'RECORD_PAYMENT',
       entity: 'Invoice',
-      description: 'Rahul Sharma paid ₹8,150 for August 2026 Rent via UPI',
+      description: 'Rahul Sharma paid ₹16,350 for August 2026 Rent via UPI',
       createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
     });
 

@@ -1,9 +1,16 @@
-import { MessMenu, MealSubscription } from '../models/Mess.js';
+import { MessMenu, MealSubscription, MealAttendance } from '../models/Mess.js';
 import User from '../models/User.js';
 import { logActivity } from '../utils/activityLogger.js';
 
-// Default 7-day template if database is freshly seeded
 const defaultDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+const getTodayDateString = (dateObj = new Date()) => {
+  const d = dateObj instanceof Date ? dateObj : new Date(dateObj);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 // @desc    Get Weekly Mess Timetable
 // @route   GET /api/mess/menu
@@ -11,8 +18,6 @@ const defaultDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sa
 export const getWeeklyMenu = async (req, res) => {
   try {
     let menu = await MessMenu.find();
-
-    // Sort in standard weekly order
     menu.sort((a, b) => defaultDays.indexOf(a.day) - defaultDays.indexOf(b.day));
 
     return res.json({
@@ -26,7 +31,7 @@ export const getWeeklyMenu = async (req, res) => {
 
 // @desc    Update a Day's Mess Menu
 // @route   PUT /api/mess/menu
-// @access  Private (Admin Only)
+// @access  Private (Admin & Staff)
 export const updateWeeklyMenu = async (req, res) => {
   try {
     const { day, breakfast, lunch, snacks, dinner, specialNote } = req.body;
@@ -62,22 +67,59 @@ export const updateWeeklyMenu = async (req, res) => {
   }
 };
 
-// @desc    Get Today's Live Meal Headcount & Subscription Stats
+// @desc    Get Live Meal Headcount for Date (Defaults to Today)
 // @route   GET /api/mess/headcount
 // @access  Private
 export const getMealHeadcount = async (req, res) => {
   try {
-    const totalTenants = await User.countDocuments({ role: 'tenant', isActive: true });
-    const subscriptions = await MealSubscription.find({ plan: { $ne: 'none' } });
+    const targetDate = req.query.date ? req.query.date.trim() : getTodayDateString();
 
-    const breakfastCount = subscriptions.filter(s => s.attendance?.breakfast).length;
-    const lunchCount = subscriptions.filter(s => s.attendance?.lunch).length;
-    const dinnerCount = subscriptions.filter(s => s.attendance?.dinner).length;
+    const activeSubscribers = await MealSubscription.find({ 
+      plan: { $ne: 'none' }, 
+      isActive: true 
+    });
+
+    const activeUserIds = activeSubscribers.map(s => s.userId);
+
+    // Query date-specific attendance for active subscribers
+    const attendances = await MealAttendance.find({
+      date: targetDate,
+      userId: { $in: activeUserIds }
+    });
+
+    const attendanceMap = new Map();
+    attendances.forEach(a => {
+      attendanceMap.set(a.userId.toString(), a);
+    });
+
+    let breakfastCount = 0;
+    let lunchCount = 0;
+    let dinnerCount = 0;
+
+    activeSubscribers.forEach(sub => {
+      const record = attendanceMap.get(sub.userId.toString());
+      if (record) {
+        if (record.breakfast) breakfastCount++;
+        if (record.lunch) lunchCount++;
+        if (record.dinner) dinnerCount++;
+      } else {
+        // Default: full subscriber attends all meals unless opted out
+        if (sub.plan === 'full') {
+          breakfastCount++;
+          lunchCount++;
+          dinnerCount++;
+        } else if (sub.plan === '2-meal') {
+          breakfastCount++;
+          dinnerCount++;
+        }
+      }
+    });
 
     return res.json({
       success: true,
       data: {
-        totalSubscribedTenants: subscriptions.length || totalTenants,
+        date: targetDate,
+        totalSubscribers: activeSubscribers.length,
         headcount: {
           breakfast: breakfastCount,
           lunch: lunchCount,
@@ -90,12 +132,13 @@ export const getMealHeadcount = async (req, res) => {
   }
 };
 
-// @desc    Get Current Tenant's Meal Subscription & Attendance Status
+// @desc    Get Current Tenant's Meal Subscription & Date-Specific Attendance
 // @route   GET /api/mess/my-subscription
 // @access  Private (Tenant)
 export const getMySubscription = async (req, res) => {
   try {
     const userId = req.user._id;
+    const targetDate = req.query.date ? req.query.date.trim() : getTodayDateString();
 
     let sub = await MealSubscription.findOne({ userId });
     if (!sub) {
@@ -104,19 +147,35 @@ export const getMySubscription = async (req, res) => {
         plan: 'full',
         monthlyCharge: 3500,
         diet: 'Vegetarian',
-        attendance: { breakfast: true, lunch: true, dinner: true }
+        isActive: true
+      });
+    }
+
+    let attendanceRecord = await MealAttendance.findOne({ userId, date: targetDate });
+    if (!attendanceRecord) {
+      attendanceRecord = await MealAttendance.create({
+        userId,
+        date: targetDate,
+        breakfast: true,
+        lunch: sub.plan !== '2-meal',
+        dinner: true
       });
     }
 
     return res.json({
       success: true,
       data: {
+        date: targetDate,
         subscription: {
           plan: sub.plan,
           monthlyCharge: sub.monthlyCharge,
           diet: sub.diet
         },
-        todayAttendance: sub.attendance
+        todayAttendance: {
+          breakfast: attendanceRecord.breakfast,
+          lunch: attendanceRecord.lunch,
+          dinner: attendanceRecord.dinner
+        }
       }
     });
   } catch (error) {
@@ -124,39 +183,46 @@ export const getMySubscription = async (req, res) => {
   }
 };
 
-// @desc    Toggle Meal Attendance (Opt-In or Skip a Meal)
+// @desc    Toggle Date-Specific Meal Attendance (Opt-In or Skip a Meal)
 // @route   PATCH /api/mess/attendance
 // @access  Private (Tenant)
 export const toggleMealAttendance = async (req, res) => {
   try {
-    const { mealType } = req.body; // 'breakfast' | 'lunch' | 'dinner'
+    const { mealType, date } = req.body;
     const userId = req.user._id;
+    const targetDate = date ? date.trim() : getTodayDateString();
 
     if (!['breakfast', 'lunch', 'dinner'].includes(mealType)) {
-      return res.status(400).json({ success: false, message: 'Invalid meal type' });
+      return res.status(400).json({ success: false, message: 'Invalid meal type. Choose breakfast, lunch, or dinner.' });
     }
 
-    let sub = await MealSubscription.findOne({ userId });
-    if (!sub) {
-      sub = new MealSubscription({
+    let attendanceRecord = await MealAttendance.findOne({ userId, date: targetDate });
+    if (!attendanceRecord) {
+      attendanceRecord = new MealAttendance({
         userId,
-        plan: 'full',
-        monthlyCharge: 3500,
-        diet: 'Vegetarian',
-        attendance: { breakfast: true, lunch: true, dinner: true }
+        date: targetDate,
+        breakfast: true,
+        lunch: true,
+        dinner: true
       });
     }
 
-    const currentVal = sub.attendance[mealType];
-    sub.attendance[mealType] = !currentVal;
-    await sub.save();
+    const currentVal = attendanceRecord[mealType];
+    attendanceRecord[mealType] = !currentVal;
+    await attendanceRecord.save();
 
     return res.json({
       success: true,
-      message: sub.attendance[mealType] ? `Opted in for ${mealType}` : `Marked skipping ${mealType}`,
+      message: attendanceRecord[mealType] ? `Opted in for ${mealType} on ${targetDate}` : `Marked skipping ${mealType} on ${targetDate}`,
       data: {
+        date: targetDate,
         mealType,
-        isAttending: sub.attendance[mealType]
+        isAttending: attendanceRecord[mealType],
+        attendance: {
+          breakfast: attendanceRecord.breakfast,
+          lunch: attendanceRecord.lunch,
+          dinner: attendanceRecord.dinner
+        }
       }
     });
   } catch (error) {

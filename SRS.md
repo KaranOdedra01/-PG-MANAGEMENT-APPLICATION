@@ -33,7 +33,7 @@ The system operates with three authenticated roles:
 ## 2. Tech Stack & Architecture
 
 ```text
-React 18 + Vite + Tailwind CSS (Frontend)
+React 19 + Vite 8 + Tailwind CSS (Frontend)
    ↓ (Axios HTTP / Bearer JWT)
 Express.js 4 (REST API + Helmet + CORS + Rate Limit)
    ↓
@@ -41,7 +41,7 @@ Zod Validation Middleware
    ↓
 Authentication & Authorization Middleware (IDOR Guard)
    ↓
-Controllers & Services
+Controllers & Services (MongoDB Transactions & Aggregations)
    ↓
 Mongoose 8 ODM (Schemas, Indexes, Pre-save Hooks)
    ↓
@@ -52,132 +52,95 @@ Google Gemini API (@google/generative-ai)
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 18, Vite, Tailwind CSS, Lucide Icons, Axios, React Router DOM, jsPDF |
-| **Backend** | Node.js, Express.js, Mongoose, JWT, bcryptjs, Helmet, Express Rate Limit, Morgan |
+| **Frontend** | React 19, Vite 8, Tailwind CSS, Lucide Icons, Axios, React Router DOM 7, jsPDF, jspdf-autotable |
+| **Backend** | Node.js (v18+), Express.js 4, Mongoose 8, JWT, bcryptjs, Helmet, Express Rate Limit, Morgan |
 | **Validation** | Zod (Reusable request schemas) |
-| **Database** | MongoDB / MongoDB Atlas (Document DB with indexes and transactions) |
-| **AI Integration** | Google Gemini API (`gemini-1.5-flash`) with dynamic database-backed context |
+| **Database** | MongoDB / MongoDB Atlas (Document DB with indexes, transactions & aggregations) |
+| **AI Integration** | Google Gemini API (`gemini-1.5-flash`) with dynamic database-backed context & PGSettings |
 | **Testing** | Node.js Test Runner (`node:test`), `node:assert`, Supertest |
 
 ---
 
 ## 3. User Roles & Access Control
 
-| Module / Action | Admin | Staff | Tenant |
-|---|---|---|---|
-| **View Dashboard** | Full PG Metrics | Maintenance Queue | Personal Room & Dues |
-| **Manage Rooms (CRUD)** | ✅ Full | 👁️ View & Status | 👁️ View |
-| **Onboard / Checkout Tenant** | ✅ Full | ✅ Full | ❌ No |
-| **Generate Invoices** | ✅ Full | 👁️ View | ❌ No |
-| **View Invoices** | All Invoices | All Invoices | Own Invoices Only |
-| **Record Payment** | ✅ Full | ✅ Full | ✅ Own Invoice |
-| **Manage Expenses** | ✅ Full | 👁️ View | ❌ No |
-| **Raise Complaint** | ✅ Full | ✅ Full | ✅ Own Ticket |
-| **Assign Complaint / Update Status** | ✅ Full | ✅ Full | ❌ No |
-| **Broadcast Notice** | ✅ Full | ✅ Full | 👁️ View Targeted |
-| **Mess Menu & Attendance** | ✅ Full | ✅ Full | ✅ Personal Attendance |
-| **Visitor Gate Check-in/out** | ✅ Full | ✅ Full | ❌ No |
-| **Financial & Occupancy Reports** | ✅ Full | ❌ No | ❌ No |
-| **AI Smart Assistant** | Full Context | Staff Context | Private Tenant Context |
+| Role | Permissions & Responsibilities |
+|---|---|
+| **Admin** | Unlimited read/write access. Manage rooms, onboard tenants, generate invoices, record expenses, assign staff to tickets, broadcast notices, view P&L executive reports, and configure PG policies. |
+| **Staff** | Maintenance ticket processing, updating ticket status, logging visitors, updating daily mess menu, and inspecting room occupancy. |
+| **Tenant** | Access personal profile, view assigned bed, track & record rent invoices, download PDF receipts, submit maintenance complaints, toggle daily mess attendance, and query AI assistant. |
 
 ---
 
 ## 4. Functional Modules
 
-### 4.1 Module 1 — Authentication & Authorization
-- **Public Registration**: Forces role `tenant`. Cannot register as admin or staff.
-- **Admin User Creation**: Only admins can create staff or admin accounts (`POST /api/auth/users`).
-- **Password Security**: Bcryptjs salt hashing. Passwords never returned in API responses.
-- **JWT Protection**: Signed with environment-based `JWT_SECRET` and expiration.
+1. **Authentication & User Management**:
+   - Secure login & registration using bcrypt salt-hashing (10 rounds).
+   - Temporary password generation on admin onboarding with `mustChangePassword` enforcement.
+   - Endpoint `/api/auth/change-password` for user self-service password update.
+   - Demo accounts endpoint protected behind `DEMO_MODE=true` environment guard.
 
-### 4.2 Module 2 — Dashboard & Real-Time Analytics
-- **Live Metrics**: Aggregate room occupancy, total beds, occupied beds, revenue collected, pending dues, total expenses, net profit, and open complaints.
-- **Activity Log**: Database-driven audit feed recording all system events with timestamps and actors.
+2. **Room & Bed Management**:
+   - `beds` subdocument is the single source of truth for occupancy.
+   - Automatic derivation of `occupiedBeds`, `availableBeds`, and `status` (`available`, `occupied`, `maintenance`).
+   - Prevention of overbooking (`occupiedBeds > capacity`) and duplicate bed assignments.
 
-### 4.3 Module 3 — Room & Bed Management
-- **Bed Tracking**: Room capacity, individual bed slots (`Bed A`, `Bed B`, etc.), occupancy counters, and status transitions (`available`, `occupied`, `maintenance`).
-- **Integrity**: Prevents `occupiedBeds > capacity`, duplicate room numbers, and negative rent.
+3. **Tenant Lifecycle**:
+   - Multi-document transactions (`withTransaction`) for onboarding and checkout.
+   - Soft deletion preserving financial and operational audit trails.
+   - Standardized pagination (`?page=1&limit=20&search=`) on tenant lists.
 
-### 4.4 Module 4 — Tenant Lifecycle & KYC
-- **Onboarding**: Room and bed assignment, KYC identification (Aadhaar, Passport, College ID), emergency contacts, and security deposit.
-- **Checkout**: Marks status `checked-out`, sets `checkOutDate`, frees room bed slot, and decrements room occupancy.
+4. **Invoices & Billing**:
+   - Server-side calculation: `baseRent + electricityCharge + maintenanceFee + messFee + lateFee - discount = totalAmount`.
+   - Payment recording semantics supporting UPI, Net Banking, Cash, and Cheque.
+   - PDF receipt download powered by jsPDF and jspdf-autotable.
 
-### 4.5 Module 5 — Invoices & Billing
-- **Server-Side Calculation**: `baseRent + electricityCharge + maintenanceFee + messFee + lateFee - discount = totalAmount`.
-- **Payment Lifecycle**: `pending` ➔ `paid` / `partially_paid` / `overdue` / `cancelled`.
-- **PDF Generation**: Instant client-side download of official rent receipts.
+5. **Complaints & Maintenance State Machine**:
+   - Valid transition matrix: `open` ➔ `assigned` ➔ `in-progress` ➔ `waiting-for-parts` ➔ `resolved` ➔ `closed`.
+   - Verified staff assignment checking active staff user accounts.
+   - Timestamps: `assignedAt`, `resolvedAt`, `closedAt`.
 
-### 4.6 Module 6 — Operating Expenses
-- **Expense Logging**: Categorized expenses (Electricity, Water, Salary, Maintenance, Internet, Groceries).
-- **P&L Summary**: Revenue vs expenses, net profit, profit margins, and category distribution.
+6. **Date-Specific Mess Management**:
+   - `MealAttendance` schema with unique compound index `{ userId: 1, date: 1 }`.
+   - Headcount queries by date (`YYYY-MM-DD`) preventing cross-day data leakage.
 
-### 4.7 Module 7 — Maintenance & Complaints Hub
-- **Status Lifecycle**: `open` ➔ `assigned` ➔ `in-progress` ➔ `waiting-for-parts` ➔ `resolved` ➔ `closed`.
-- **Ticket Tracking**: Auto-generated ticket number, category tagging, priority levels (`low`, `medium`, `high`, `urgent`), resolution notes, and cost tracking.
+7. **Visitor Gatekeeper**:
+   - Authoritative room and active host tenant verification.
+   - Late-night visitor detection (9:00 PM – 6:00 AM).
 
-### 4.8 Module 8 — Notice Board
-- **Announcements**: Category, priority, pinned status, and role-based targeting (`all`, `tenant`, `staff`, `admin`).
-- **Read Tracking**: Acknowledgment tracking per user.
+8. **Executive Reports & Analytics**:
+   - Pure MongoDB aggregation pipelines (`$group`, `$sum`, `$project`, `$sort`) for financial summaries and occupancy audits.
 
-### 4.9 Module 9 — Mess & Meal Management
-- **Timetable**: 7-day weekly menu timetable (Breakfast, Lunch, Snacks, Dinner).
-- **Attendance**: 1-click meal toggle to prevent kitchen food wastage with live meal headcounts.
-- **Subscriptions**: Meal plans (`full`, `2-meal`, `none`) and dietary preferences.
-
-### 4.10 Module 10 — Visitor Logging
-- **Gate Logging**: Entry timestamp, host tenant association, purpose of visit, vehicle registration, late-night visitor flag, and check-out timestamp.
-
-### 4.11 Module 11 — Reports & Analytics
-- **Executive Summaries**: Aggregated operational, occupancy, and financial metrics.
-- **Data Export**: CSV and PDF export capabilities.
-
-### 4.12 Module 12 — Gemini AI Smart Assistant
-- **Real-Time Context**: Dynamic queries to MongoDB (user's billing, user's room, available rooms, today's menu, active notices).
-- **Privacy Filter**: Strict isolation preventing tenants from querying other tenants' private information.
-- **Tools**: AI Chatbot, automated complaint classifier & priority tagger, and rent reminder composer.
+9. **AI Resident Assistant**:
+   - Dynamic hostel facts loaded from `PGSettings` collection.
+   - Intent-based retrieval with strict role authorization.
+   - Untrusted client conversation history sanitization.
 
 ---
 
 ## 5. Database Schema Design
 
-### 5.1 Entities
-- **`User`**: `name`, `email` (unique, indexed), `password` (select: false), `role`, `phone`, `roomId`, `roomNumber`, `isActive`, `emergencyContact`.
-- **`Room`**: `roomNumber` (unique, indexed), `floor`, `type`, `capacity`, `occupiedBeds`, `rent`, `status`, `amenities`, `beds`, `tenants`.
-- **`Tenant`**: `userId` (indexed), `roomId` (indexed), `roomNumber`, `bedNumber`, `name`, `email` (indexed), `phone`, `checkInDate`, `checkOutDate`, `securityDeposit`, `monthlyRent`, `idProofType`, `idProofNumber`, `status`.
-- **`Invoice`**: `invoiceNumber` (unique, indexed), `tenantId` (indexed), `tenantName`, `roomNumber`, `month` (indexed), `baseRent`, `electricityCharge`, `maintenanceFee`, `messFee`, `lateFee`, `discount`, `totalAmount`, `status`, `dueDate`, `paidDate`, `paymentMode`.
-- **`Expense`**: `category` (indexed), `amount`, `description`, `date` (indexed), `paymentMode`, `receiptRef`, `addedBy`.
-- **`Complaint`**: `ticketNumber` (unique, indexed), `tenantId` (indexed), `tenantName`, `roomNumber`, `title`, `description`, `category`, `priority`, `status`, `assignedTo`, `assignedStaffId`, `resolutionNote`, `actualCost`.
+- **`User`**: `name`, `email`, `password`, `role`, `phone`, `avatar`, `roomId`, `roomNumber`, `isActive`, `mustChangePassword`, `emergencyContact`.
+- **`Room`**: `roomNumber`, `floor`, `type`, `capacity`, `occupiedBeds`, `rent`, `status`, `amenities`, `beds: [{ bedNumber, isOccupied, tenantId }]`, `tenants: [ObjectId]`.
+- **`Tenant`**: `userId`, `roomId`, `roomNumber`, `bedNumber`, `name`, `email`, `phone`, `checkInDate`, `checkOutDate`, `securityDeposit`, `monthlyRent`, `idProofType`, `idProofNumber`, `emergencyContact`, `status`, `isActive`, `deletedAt`.
+- **`Invoice`**: `tenantId`, `tenantName`, `roomNumber`, `invoiceNumber`, `month`, `baseRent`, `electricityCharge`, `maintenanceFee`, `messFee`, `lateFee`, `discount`, `totalAmount`, `status`, `dueDate`, `paidDate`, `paymentMode`, `transactionId`.
+- **`Expense`**: `category`, `amount`, `description`, `date`, `paymentMode`, `receiptRef`, `addedBy`.
+- **`Complaint`**: `ticketNumber`, `tenantId`, `tenantName`, `roomNumber`, `title`, `description`, `category`, `priority`, `status`, `assignedTo`, `assignedStaffId`, `assignedAt`, `resolvedAt`, `closedAt`, `resolutionNote`, `actualCost`.
 - **`Notice`**: `title`, `content`, `category`, `priority`, `targetRoles`, `postedBy`, `isPinned`, `readBy`.
-- **`MessMenu`**: `day` (unique, indexed), `breakfast`, `lunch`, `snacks`, `dinner`, `specialNote`.
-- **`MealSubscription`**: `userId` (unique, indexed), `plan`, `monthlyCharge`, `diet`, `attendance`.
-- **`Visitor`**: `name`, `phone`, `visitorType`, `tenantId`, `tenantName`, `roomNumber`, `purpose`, `vehicleNumber`, `entryTime`, `exitTime`, `status`, `isLateNight`.
-- **`Notification`**: `recipient` (indexed), `type`, `title`, `message`, `link`, `isRead`.
-- **`ActivityLog`**: `actor`, `action` (indexed), `entity` (indexed), `entityId`, `description`, `metadata`, `createdAt` (indexed).
+- **`MessMenu`**: `day`, `breakfast`, `lunch`, `snacks`, `dinner`, `specialNote`.
+- **`MealSubscription`**: `userId`, `plan`, `monthlyCharge`, `diet`, `isActive`.
+- **`MealAttendance`**: `userId`, `date (YYYY-MM-DD)`, `breakfast`, `lunch`, `dinner` (Compound Unique: `{ userId, date }`).
+- **`PGSettings`**: `hostelName`, `address`, `gateOpeningTime`, `gateClosingTime`, `visitingHoursStart`, `visitingHoursEnd`, `silentHoursStart`, `silentHoursEnd`, `wifiSsid`, `wifiDetails`, `emergencyContacts`, `generalRules`.
+- **`Visitor`**: `name`, `phone`, `visitorType`, `tenantId`, `tenantName`, `roomNumber`, `purpose`, `vehicleNumber`, `entryTime`, `exitTime`, `status`, `isLateNight`, `loggedBy`.
+- **`Notification`**: `recipient`, `type`, `title`, `message`, `link`, `isRead`.
+- **`ActivityLog`**: `actor: { userId, name, role }`, `action`, `entity`, `entityId`, `description`.
 
 ---
 
 ## 6. Security & Cybersecurity Specifications
 
-1. **Zero In-Memory Storage**: MongoDB is the sole source of truth.
-2. **IDOR Defense**: All tenant routes verify resource ownership.
-3. **Password Security**: Bcrypt with salt rounds, no plain-text storage or return.
-4. **Input Validation**: Strict Zod schemas validating types, bounds, lengths, and formats.
-5. **Rate Limiting**: Brute-force protection on authentication and AI endpoints.
-6. **Security Headers**: Helmet with cross-origin policies and environment CORS.
-7. **Environment Safety**: Production fails safely if `JWT_SECRET` is unset.
-
----
-
-## 7. AI Integration Specifications
-
-- **Integration**: Google Gemini API via `@google/generative-ai`.
-- **Context Injection**: Live database state fetched dynamically per request based on user role.
-- **Safety**: Strict prompt guardrails preventing credentials, password leaks, or cross-tenant private data disclosures.
-- **Context Window Management**: Automatic conversation history truncation (last 6 messages).
-
----
-
-## 8. Automated Testing & QA
-
-- Automated unit and security tests verifying Zod schemas, JWT validation, password hashing, role authorization, business logic, bed occupancy calculations, and heuristic classifications.
-- Build verification ensuring zero frontend bundle or syntax errors.
+1. **CORS Allowlist**: Explicit allowlist based on `CLIENT_URL` rejecting unknown origins.
+2. **Environment Validation**: Startup sequence validates `JWT_SECRET`, `MONGO_URI`, `CLIENT_URL` and halts server on missing values.
+3. **No Hardcoded Secrets**: Removed all hardcoded JWT fallback keys across the entire codebase.
+4. **IDOR Guards**: Tenants can only read/mutate their own invoices, complaints, and profiles.
+5. **Rate Limiting**: Auth brute-force protection (30 req / 15 min), AI rate limit (30 req / min), general API limiter (500 req / 15 min).
+6. **Input Validation**: Zod schema validation on all incoming payload bodies and query parameters.

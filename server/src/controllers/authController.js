@@ -1,14 +1,12 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { getJwtSecret, config } from '../config/env.js';
 import { logActivity } from '../utils/activityLogger.js';
 
 const generateToken = (id, role) => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === 'production') {
-    throw new Error('JWT_SECRET is not set in production');
-  }
-  return jwt.sign({ id, role }, secret || 'dev_secret_pg_jwt_key_2026', {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+  const secret = getJwtSecret();
+  return jwt.sign({ id, role }, secret, {
+    expiresIn: config.jwtExpiresIn || '7d'
   });
 };
 
@@ -35,7 +33,8 @@ export const register = async (req, res) => {
       password,
       role: 'tenant',
       phone: phone || '',
-      emergencyContact: emergencyContact || {}
+      emergencyContact: emergencyContact || {},
+      mustChangePassword: false
     });
 
     const token = generateToken(user._id, user.role);
@@ -58,6 +57,7 @@ export const register = async (req, res) => {
         role: user.role,
         phone: user.phone,
         avatar: user.avatar,
+        mustChangePassword: user.mustChangePassword,
         token
       }
     });
@@ -102,8 +102,48 @@ export const login = async (req, res) => {
         avatar: user.avatar,
         roomId: user.roomId,
         roomNumber: user.roomNumber,
+        mustChangePassword: user.mustChangePassword || false,
         token
       }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Change Password (for mandatory password change or user preference)
+// @route   POST /api/auth/change-password
+// @access  Private
+export const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const user = await User.findById(req.user._id).select('+password');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Verify current password unless mandatory change was required and old password matched
+    const isMatch = await user.matchPassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+    }
+
+    user.password = newPassword;
+    user.mustChangePassword = false;
+    await user.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'PASSWORD_CHANGE',
+      entity: 'User',
+      entityId: user._id,
+      description: `User ${user.name} changed their password`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Password changed successfully'
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -129,7 +169,8 @@ export const createPrivilegedUser = async (req, res) => {
       password,
       role: role || 'staff',
       phone: phone || '',
-      emergencyContact: emergencyContact || {}
+      emergencyContact: emergencyContact || {},
+      mustChangePassword: false
     });
 
     await logActivity({
@@ -174,10 +215,17 @@ export const getMe = async (req, res) => {
   }
 };
 
-// @desc    Get Demo Accounts Info for Quick Testing
+// @desc    Get Demo Accounts Info (Disabled in Production unless DEMO_MODE=true)
 // @route   GET /api/auth/demo-accounts
 // @access  Public
 export const getDemoAccounts = async (req, res) => {
+  if (!config.demoMode) {
+    return res.status(403).json({
+      success: false,
+      message: 'Demo accounts are disabled in production environment'
+    });
+  }
+
   res.json({
     success: true,
     data: [

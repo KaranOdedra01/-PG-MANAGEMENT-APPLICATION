@@ -1,16 +1,17 @@
 import mongoose from 'mongoose';
+import { config } from './env.js';
 
 export const connectDB = async () => {
-  const uri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/pg_management';
+  const uri = config.mongoUri;
   try {
     const conn = await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 5000,
     });
     console.log(`✅ MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`);
-    return true;
+    return conn;
   } catch (error) {
-    console.error(`❌ MongoDB Connection Error: ${error.message}`);
-    console.error(`👉 Please ensure MongoDB is running locally or provide a valid MONGO_URI in server/.env`);
-    return false;
+    console.error(`❌ FATAL MongoDB Connection Error: ${error.message}`);
+    console.error(`👉 Please ensure MongoDB is running or provide a valid MONGO_URI environment variable.`);
+    throw error;
   }
 };
