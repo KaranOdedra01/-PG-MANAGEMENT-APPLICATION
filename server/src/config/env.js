@@ -77,7 +77,7 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || '',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   mongoUri: process.env.MONGO_URI || process.env.MONGO_URL || process.env.MONGODB_URI || (process.env.NODE_ENV === 'test' ? 'mongodb://127.0.0.1:27017/pg_management_test' : ''),
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  clientUrl: process.env.CLIENT_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173')),
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   demoMode: process.env.DEMO_MODE === 'true' || (process.env.NODE_ENV !== 'production' && process.env.DEMO_MODE !== 'false')
 };

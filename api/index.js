@@ -6,11 +6,24 @@ import { autoSeedIfEmpty } from '../server/src/utils/seed.js';
 let isDbConnected = false;
 
 export default async function handler(req, res) {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  const origin = req.headers.origin;
+  const isProd = config.nodeEnv === 'production' || process.env.NODE_ENV === 'production';
+  const allowedOriginList = [
+    config.clientUrl,
+    process.env.CLIENT_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+    !isProd ? 'http://localhost:5173' : null,
+    !isProd ? 'http://127.0.0.1:5173' : null,
+    !isProd ? 'http://localhost:3000' : null,
+    !isProd ? 'http://127.0.0.1:3000' : null
+  ].filter(Boolean).map(u => u.replace(/\/$/, ''));
+
+  if (origin && allowedOriginList.includes(origin.replace(/\/$/, ''))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  }
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
