@@ -373,7 +373,7 @@ export const Complaints = () => {
                         <span>•</span>
                         <span>Logged: {new Date(ticket.createdAt).toLocaleDateString()}</span>
                         <span>•</span>
-                        <span>Assigned Staff: <strong className="text-slate-300">{ticket.assignedTo}</strong></span>
+                        <span>Assigned Staff: <strong className="text-slate-300">{ticket.assignedStaffId?.name || ticket.assignedTo || 'Unassigned'}</strong></span>
                       </p>
                     </div>
                   </div>

@@ -15,8 +15,13 @@ if (!process.env.NODE_ENV && process.argv.some(arg => arg.includes('--test') || 
   process.env.NODE_ENV = 'test';
 }
 
-if (process.env.NODE_ENV === 'test' && !process.env.JWT_SECRET) {
-  process.env.JWT_SECRET = 'unit_testing_secure_jwt_secret_key_32_characters_long_2026';
+if (process.env.NODE_ENV === 'test') {
+  if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = 'unit_testing_secure_jwt_secret_key_32_characters_long_2026';
+  }
+  if (!process.env.MONGO_URI) {
+    process.env.MONGO_URI = 'mongodb://127.0.0.1:27017/pg_management_test';
+  }
 }
 
 /**
@@ -29,10 +34,11 @@ export const validateEnv = () => {
     missing.push('JWT_SECRET');
   }
 
+  if (!process.env.MONGO_URI && process.env.NODE_ENV !== 'test') {
+    missing.push('MONGO_URI');
+  }
+
   if (process.env.NODE_ENV === 'production') {
-    if (!process.env.MONGO_URI) {
-      missing.push('MONGO_URI');
-    }
     if (!process.env.CLIENT_URL) {
       missing.push('CLIENT_URL');
     }
@@ -58,7 +64,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret: process.env.JWT_SECRET || '',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  mongoUri: process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/pg_management',
+  mongoUri: process.env.MONGO_URI || (process.env.NODE_ENV === 'test' ? 'mongodb://127.0.0.1:27017/pg_management_test' : ''),
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   demoMode: process.env.DEMO_MODE === 'true' || (process.env.NODE_ENV !== 'production' && process.env.DEMO_MODE !== 'false')

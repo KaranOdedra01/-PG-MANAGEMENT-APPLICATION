@@ -253,7 +253,7 @@ export const assignComplaint = async (req, res) => {
       recipient: complaint.tenantId,
       type: 'complaint',
       title: 'Complaint Assigned',
-      message: `Your complaint #${complaint.ticketNumber || complaint._id} has been assigned to ${staffName}.`,
+      message: `Your complaint #${complaint.ticketNumber || complaint._id} has been assigned to ${staffUser.name}.`,
       link: '/complaints'
     });
 
@@ -262,12 +262,12 @@ export const assignComplaint = async (req, res) => {
       action: 'ASSIGN_COMPLAINT',
       entity: 'Complaint',
       entityId: complaint._id,
-      description: `Assigned complaint #${complaint.ticketNumber || complaint._id} to ${staffName}`
+      description: `Assigned complaint #${complaint.ticketNumber || complaint._id} to ${staffUser.name}`
     });
 
     return res.json({
       success: true,
-      message: `Complaint assigned to ${staffName}`,
+      message: `Complaint assigned to ${staffUser.name}`,
       data: complaint
     });
   } catch (error) {
