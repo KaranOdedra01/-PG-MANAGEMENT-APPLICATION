@@ -10,6 +10,17 @@ const serverEnvPath = path.resolve(__dirname, '../../.env');
 dotenv.config({ path: serverEnvPath });
 dotenv.config();
 
+// Normalize MongoDB URI aliases (MONGO_URI, MONGO_URL, MONGODB_URI)
+const resolvedMongoUri = process.env.MONGO_URI || process.env.MONGO_URL || process.env.MONGODB_URI || '';
+if (resolvedMongoUri && !process.env.MONGO_URI) {
+  process.env.MONGO_URI = resolvedMongoUri;
+}
+
+// Auto-infer Vercel CLIENT_URL if running in Vercel
+if (!process.env.CLIENT_URL && process.env.VERCEL_URL) {
+  process.env.CLIENT_URL = `https://${process.env.VERCEL_URL}`;
+}
+
 // Auto-detect test runner if not explicitly set
 if (!process.env.NODE_ENV && process.argv.some(arg => arg.includes('--test') || arg.includes('test'))) {
   process.env.NODE_ENV = 'test';
@@ -34,11 +45,12 @@ export const validateEnv = () => {
     missing.push('JWT_SECRET');
   }
 
-  if (!process.env.MONGO_URI && process.env.NODE_ENV !== 'test') {
+  const effectiveMongoUri = process.env.MONGO_URI || process.env.MONGO_URL || process.env.MONGODB_URI;
+  if (!effectiveMongoUri && process.env.NODE_ENV !== 'test') {
     missing.push('MONGO_URI');
   }
 
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
     if (!process.env.CLIENT_URL) {
       missing.push('CLIENT_URL');
     }
@@ -64,7 +76,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret: process.env.JWT_SECRET || '',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  mongoUri: process.env.MONGO_URI || (process.env.NODE_ENV === 'test' ? 'mongodb://127.0.0.1:27017/pg_management_test' : ''),
+  mongoUri: process.env.MONGO_URI || process.env.MONGO_URL || process.env.MONGODB_URI || (process.env.NODE_ENV === 'test' ? 'mongodb://127.0.0.1:27017/pg_management_test' : ''),
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   demoMode: process.env.DEMO_MODE === 'true' || (process.env.NODE_ENV !== 'production' && process.env.DEMO_MODE !== 'false')
