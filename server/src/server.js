@@ -208,6 +208,6 @@ export const startServer = async () => {
 
 export default app;
 
-if (process.env.NODE_ENV !== 'test' && config.nodeEnv !== 'test') {
+if (process.env.NODE_ENV !== 'test' && config.nodeEnv !== 'test' && !process.env.VERCEL) {
   startServer();
 }

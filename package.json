@@ -2,14 +2,28 @@
   "name": "pg-management-system",
   "version": "2.0.0",
   "description": "Full-Stack PG Management System (MERN + Gemini AI)",
+  "type": "module",
   "scripts": {
+    "build": "npm --prefix client run build",
     "server": "npm --prefix server start",
     "server:dev": "npm --prefix server run dev",
     "client": "npm --prefix client run dev",
     "client:build": "npm --prefix client run build",
     "seed": "npm --prefix server run seed",
-    "test": "npm --prefix server run test",
-    "build": "npm --prefix client run build"
+    "test": "npm --prefix server run test"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.5",
+    "morgan": "^1.10.0",
+    "zod": "^3.24.1"
   },
   "keywords": [
     "pg-management",
