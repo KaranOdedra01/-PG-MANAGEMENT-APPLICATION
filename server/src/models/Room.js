@@ -71,8 +71,9 @@ roomSchema.pre('save', function(next) {
     this.tenants = occupied.map(b => b.tenantId);
   }
 
+  // Data corruption guard: Abort if occupied beds exceed room capacity
   if (this.occupiedBeds > this.capacity) {
-    this.occupiedBeds = this.capacity;
+    return next(new Error(`Data Corruption Error: Room ${this.roomNumber} has ${this.occupiedBeds} occupied beds, which exceeds capacity of ${this.capacity}.`));
   }
 
   // Clear semantics: maintenance is manual; available vs occupied is calculated automatically

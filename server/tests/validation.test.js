@@ -10,9 +10,12 @@ import {
   createInvoiceSchema,
   createExpenseSchema,
   createComplaintSchema,
+  assignComplaintSchema,
+  changePasswordSchema,
   createNoticeSchema,
   checkinVisitorSchema,
-  aiChatSchema
+  aiChatSchema,
+  zObjectId
 } from '../src/validators/index.js';
 
 describe('Validation Schemas (Zod)', () => {
@@ -231,6 +234,30 @@ describe('Validation Schemas (Zod)', () => {
         phone: '+91 98111 99999'
       };
       assert.throws(() => checkinVisitorSchema.parse(invalid));
+    });
+  });
+
+  describe('ObjectId & Complaint Assignment Validation', () => {
+    it('should accept valid 24-character hex MongoDB ObjectId', () => {
+      const validId = '66c1a0010000000000000001';
+      assert.doesNotThrow(() => zObjectId.parse(validId));
+    });
+
+    it('should reject fake prefixed IDs like usr_123 or mem_456', () => {
+      assert.throws(() => zObjectId.parse('usr_123'));
+      assert.throws(() => zObjectId.parse('mem_456'));
+      assert.throws(() => zObjectId.parse('room_789'));
+    });
+
+    it('should validate assignComplaintSchema with valid assignedStaffId', () => {
+      const valid = { assignedStaffId: '66c1a0010000000000000001' };
+      const parsed = assignComplaintSchema.parse(valid);
+      assert.equal(parsed.assignedStaffId, valid.assignedStaffId);
+    });
+
+    it('should reject assignComplaintSchema with invalid or missing assignedStaffId', () => {
+      assert.throws(() => assignComplaintSchema.parse({}));
+      assert.throws(() => assignComplaintSchema.parse({ assignedStaffId: 'invalid-id' }));
     });
   });
 

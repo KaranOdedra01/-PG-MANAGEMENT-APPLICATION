@@ -211,36 +211,36 @@ export const updateComplaintStatus = async (req, res) => {
   }
 };
 
-// @desc    Assign Staff to Complaint with Verification
+// @desc    Assign Staff to Complaint with Strict User Verification
 // @route   PATCH /api/complaints/:id/assign
 // @access  Private (Admin & Staff)
 export const assignComplaint = async (req, res) => {
   try {
     const { id } = req.params;
-    const { assignedTo, assignedStaffId } = req.body;
+    const { assignedStaffId } = req.body;
+
+    if (!assignedStaffId) {
+      return res.status(400).json({
+        success: false,
+        message: 'assignedStaffId is required'
+      });
+    }
 
     const complaint = await Complaint.findById(id);
     if (!complaint) {
       return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
-    let staffName = assignedTo ? assignedTo.trim() : 'Assigned Staff';
-    let validStaffId = null;
-
-    if (assignedStaffId) {
-      const staffUser = await User.findById(assignedStaffId);
-      if (!staffUser || (staffUser.role !== 'staff' && staffUser.role !== 'admin') || !staffUser.isActive) {
-        return res.status(400).json({
-          success: false,
-          message: 'Assigned user must be an active staff or administrator'
-        });
-      }
-      staffName = staffUser.name;
-      validStaffId = staffUser._id;
+    const staffUser = await User.findById(assignedStaffId);
+    if (!staffUser || (staffUser.role !== 'staff' && staffUser.role !== 'admin') || !staffUser.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Assigned user must be an active staff or administrator'
+      });
     }
 
-    complaint.assignedTo = staffName;
-    complaint.assignedStaffId = validStaffId;
+    complaint.assignedStaffId = staffUser._id;
+    complaint.assignedTo = staffUser.name;
     complaint.assignedAt = new Date();
     if (complaint.status === 'open') {
       complaint.status = 'assigned';

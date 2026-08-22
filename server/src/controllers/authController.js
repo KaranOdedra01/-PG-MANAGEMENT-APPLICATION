@@ -235,3 +235,18 @@ export const getDemoAccounts = async (req, res) => {
     ]
   });
 };
+
+// @desc    Get all active Staff and Admin users for assignment dropdowns
+// @route   GET /api/auth/staff
+// @access  Private
+export const getStaffList = async (req, res) => {
+  try {
+    const staff = await User.find({ role: { $in: ['staff', 'admin'] }, isActive: true }).select('name email role phone');
+    return res.json({
+      success: true,
+      data: staff
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};

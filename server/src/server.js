@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -111,14 +112,22 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-// Health Check Endpoint
+// Health Check Endpoint (Real MongoDB Connection Verification)
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
+  const isDbConnected = mongoose.connection.readyState === 1;
+  const status = isDbConnected ? 'healthy' : 'unhealthy';
+  const httpStatus = isDbConnected ? 200 : 503;
+
+  return res.status(httpStatus).json({
+    status,
     timestamp: new Date().toISOString(),
     service: 'PG Management System API v2.0',
     environment: config.nodeEnv,
-    database: 'MongoDB',
+    database: {
+      status: isDbConnected ? 'connected' : 'disconnected',
+      host: mongoose.connection.host || 'unavailable',
+      name: mongoose.connection.name || 'unavailable'
+    },
     geminiEnabled: !!config.geminiApiKey
   });
 });

@@ -8,7 +8,7 @@ const pgSettingsSchema = new mongoose.Schema({
   },
   address: {
     type: String,
-    default: 'Near Infocity, Gandhinagar, Gujarat',
+    default: '',
     trim: true
   },
   gateOpeningTime: {
@@ -37,17 +37,17 @@ const pgSettingsSchema = new mongoose.Schema({
   },
   wifiSsid: {
     type: String,
-    default: 'PG_HighSpeed_Fiber'
+    default: ''
   },
   wifiDetails: {
     type: String,
-    default: '200 Mbps High Speed Fiber Network. Password is provided at reception upon physical verification.'
+    default: ''
   },
   emergencyContacts: {
-    ambulance: { type: String, default: '108' },
-    police: { type: String, default: '112' },
-    wardenPhone: { type: String, default: '+91 98765 43210' },
-    nearestHospital: { type: String, default: 'Apollo Hospital (1.5 km)' }
+    ambulance: { type: String, default: '' },
+    police: { type: String, default: '' },
+    wardenPhone: { type: String, default: '' },
+    nearestHospital: { type: String, default: '' }
   },
   generalRules: {
     type: [String],

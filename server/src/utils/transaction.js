@@ -1,9 +1,11 @@
 import mongoose from 'mongoose';
 
 /**
- * Execute a callback within a MongoDB session/transaction.
- * If running on standalone MongoDB where transactions aren't supported,
- * executes callback directly to ensure compatibility across all environments.
+ * Execute a critical multi-document database operation within a verified MongoDB transaction.
+ * 
+ * NOTE: MongoDB Multi-Document Transactions require a Replica Set deployment
+ * or MongoDB Atlas Cloud instance. Standalone MongoDB instances do not support
+ * ACID transactions. For production data integrity, transactions do not silently fallback.
  */
 export const withTransaction = async (callback) => {
   let session = null;
@@ -19,10 +21,17 @@ export const withTransaction = async (callback) => {
     if (session && session.inTransaction()) {
       await session.abortTransaction();
     }
-    // If error is due to standalone MongoDB not supporting transactions, retry without transaction
+    
+    // Explicit transaction requirement enforcement
     if (error.message && error.message.includes('Transactions are not supported by this deployment')) {
-      return await callback(null);
+      const err = new Error(
+        'Transaction Failed: MongoDB multi-document transactions require a Replica Set or MongoDB Atlas deployment. ' +
+        'Standalone local MongoDB does not support ACID transaction sessions.'
+      );
+      err.statusCode = 500;
+      throw err;
     }
+
     throw error;
   } finally {
     if (session) {

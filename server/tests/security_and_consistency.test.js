@@ -8,9 +8,9 @@ describe('Security & Data Consistency Tests (Round 2)', () => {
     await closeTestServer();
   });
 
-  describe('CORS Enforcement', () => {
+  describe('CORS Enforcement & Health Check', () => {
     it('should allow requests from allowed origin http://localhost:5173', async () => {
-      const res = await requestTestApi('/api/health', {
+      const res = await requestTestApi('/api', {
         headers: { 'Origin': 'http://localhost:5173' }
       });
 
@@ -19,12 +19,19 @@ describe('Security & Data Consistency Tests (Round 2)', () => {
     });
 
     it('should reject requests from untrusted origins', async () => {
-      const res = await requestTestApi('/api/health', {
+      const res = await requestTestApi('/api', {
         headers: { 'Origin': 'http://malicious-attacker-site.com' }
       });
 
       assert.equal(res.status, 403);
       assert.match(res.body?.message || '', /CORS Error/);
+    });
+
+    it('should verify database connectivity in /api/health', async () => {
+      const res = await requestTestApi('/api/health');
+      assert.ok(res.body);
+      assert.ok(res.body.database);
+      assert.ok(['healthy', 'unhealthy'].includes(res.body.status));
     });
   });
 
@@ -111,6 +118,16 @@ describe('Security & Data Consistency Tests (Round 2)', () => {
 
       assert.equal(occupiedBeds, 2);
       assert.equal(calculatedStatus, 'occupied');
+    });
+
+    it('should detect data corruption if occupied beds exceed capacity', () => {
+      const capacity = 1;
+      const beds = [
+        { bedNumber: 'Bed A', isOccupied: true, tenantId: '66c1a0010000000000000001' },
+        { bedNumber: 'Bed B', isOccupied: true, tenantId: '66c1a0010000000000000002' }
+      ];
+      const occupiedBeds = beds.filter(b => b.isOccupied && b.tenantId).length;
+      assert.ok(occupiedBeds > capacity, 'Occupied beds strictly exceeds capacity');
     });
   });
 

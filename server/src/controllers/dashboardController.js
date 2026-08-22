@@ -7,7 +7,7 @@ import User from '../models/User.js';
 import Tenant from '../models/Tenant.js';
 import ActivityLog from '../models/ActivityLog.js';
 
-// @desc    Get Role-Tailored Dashboard Metrics (Pure MongoDB Aggregation)
+// @desc    Get Role-Tailored Dashboard Metrics (Optimized MongoDB Aggregations)
 // @route   GET /api/dashboard/stats
 // @access  Private
 export const getDashboardStats = async (req, res) => {
@@ -16,44 +16,80 @@ export const getDashboardStats = async (req, res) => {
     const userId = req.user._id;
 
     if (role === 'admin') {
-      // 1. Rooms & Occupancy
-      const rooms = await Room.find();
-      const totalRooms = rooms.length;
-      const totalBeds = rooms.reduce((sum, r) => sum + (r.capacity || 0), 0);
-      const occupiedBeds = rooms.reduce((sum, r) => sum + (r.occupiedBeds || 0), 0);
+      // 1. Rooms & Occupancy Pipeline
+      const [roomAgg] = await Room.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRooms: { $sum: 1 },
+            totalBeds: { $sum: '$capacity' },
+            occupiedBeds: { $sum: '$occupiedBeds' },
+            single: { $sum: { $cond: [{ $eq: ['$type', 'single'] }, 1, 0] } },
+            double: { $sum: { $cond: [{ $eq: ['$type', 'double'] }, 1, 0] } },
+            triple: { $sum: { $cond: [{ $eq: ['$type', 'triple'] }, 1, 0] } },
+            dormitory: { $sum: { $cond: [{ $eq: ['$type', 'dormitory'] }, 1, 0] } }
+          }
+        }
+      ]);
+
+      const totalRooms = roomAgg?.totalRooms || 0;
+      const totalBeds = roomAgg?.totalBeds || 0;
+      const occupiedBeds = roomAgg?.occupiedBeds || 0;
       const availableBeds = Math.max(0, totalBeds - occupiedBeds);
       const occupancyRate = totalBeds > 0 ? Number(((occupiedBeds / totalBeds) * 100).toFixed(1)) : 0;
 
       const roomTypes = {
-        single: rooms.filter(r => r.type === 'single').length,
-        double: rooms.filter(r => r.type === 'double').length,
-        triple: rooms.filter(r => r.type === 'triple').length,
-        dormitory: rooms.filter(r => r.type === 'dormitory').length,
+        single: roomAgg?.single || 0,
+        double: roomAgg?.double || 0,
+        triple: roomAgg?.triple || 0,
+        dormitory: roomAgg?.dormitory || 0
       };
 
-      // 2. Financials
-      const invoices = await Invoice.find();
-      const totalRevenueCollected = invoices
-        .filter(inv => inv.status === 'paid')
-        .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+      // 2. Financials Pipelines
+      const invoiceAgg = await Invoice.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            total: { $sum: '$totalAmount' }
+          }
+        }
+      ]);
 
-      const totalPendingDues = invoices
-        .filter(inv => inv.status === 'pending' || inv.status === 'overdue' || inv.status === 'partially_paid')
-        .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+      let totalRevenueCollected = 0;
+      let totalPendingDues = 0;
+      invoiceAgg.forEach(inv => {
+        if (inv._id === 'paid') {
+          totalRevenueCollected += inv.total;
+        } else {
+          totalPendingDues += inv.total;
+        }
+      });
 
-      const expenses = await Expense.find();
-      const totalExpenses = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+      const [expenseAgg] = await Expense.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalExpenses: { $sum: '$amount' }
+          }
+        }
+      ]);
+      const totalExpenses = expenseAgg?.totalExpenses || 0;
       const netProfit = totalRevenueCollected - totalExpenses;
 
-      // 3. Complaints
-      const complaints = await Complaint.find();
-      const totalComplaints = complaints.length;
-      const openComplaints = complaints.filter(c => c.status !== 'resolved' && c.status !== 'closed').length;
-      const highPriorityComplaints = complaints.filter(c => (c.priority === 'high' || c.priority === 'urgent') && c.status !== 'resolved' && c.status !== 'closed').length;
-
-      // 4. Counts
-      const totalTenants = await Tenant.countDocuments({ status: 'active' });
-      const totalStaff = await User.countDocuments({ role: 'staff', isActive: true });
+      // 3. Complaints & Counts (Parallel countDocuments)
+      const [
+        totalComplaints,
+        openComplaints,
+        highPriorityComplaints,
+        totalTenants,
+        totalStaff
+      ] = await Promise.all([
+        Complaint.countDocuments(),
+        Complaint.countDocuments({ status: { $nin: ['resolved', 'closed'] } }),
+        Complaint.countDocuments({ priority: { $in: ['high', 'urgent'] }, status: { $nin: ['resolved', 'closed'] } }),
+        Tenant.countDocuments({ status: 'active', isActive: true }),
+        User.countDocuments({ role: 'staff', isActive: true })
+      ]);
 
       return res.json({
         success: true,
@@ -86,26 +122,25 @@ export const getDashboardStats = async (req, res) => {
     }
 
     if (role === 'tenant') {
-      const tenant = await Tenant.findOne({ userId });
-      const myInvoices = await Invoice.find({ tenantId: userId }).sort({ dueDate: -1 });
+      const [tenant, myInvoices, myComplaints, latestNotices] = await Promise.all([
+        Tenant.findOne({ userId, isActive: true }),
+        Invoice.find({ tenantId: userId }).sort({ dueDate: -1 }).limit(10),
+        Complaint.find({ tenantId: userId }).sort({ createdAt: -1 }).limit(10),
+        Notice.find({ targetRoles: { $in: ['all', 'tenant'] } }).sort({ isPinned: -1, createdAt: -1 }).limit(3)
+      ]);
+
       const latestInvoice = myInvoices[0] || null;
       const totalPending = myInvoices
         .filter(i => i.status !== 'paid')
         .reduce((s, i) => s + (i.totalAmount || 0), 0);
 
-      const myComplaints = await Complaint.find({ tenantId: userId }).sort({ createdAt: -1 });
       const activeCount = myComplaints.filter(c => c.status !== 'resolved' && c.status !== 'closed').length;
 
       let myRoom = null;
-      if (tenant?.roomId) {
-        myRoom = await Room.findById(tenant.roomId);
-      } else if (req.user.roomId) {
-        myRoom = await Room.findById(req.user.roomId);
+      const roomId = tenant?.roomId || req.user.roomId;
+      if (roomId) {
+        myRoom = await Room.findById(roomId).select('roomNumber type floor rent amenities');
       }
-
-      const latestNotices = await Notice.find({ targetRoles: { $in: ['all', 'tenant'] } })
-        .sort({ isPinned: -1, createdAt: -1 })
-        .limit(3);
 
       return res.json({
         success: true,
@@ -133,16 +168,16 @@ export const getDashboardStats = async (req, res) => {
     }
 
     if (role === 'staff') {
-      const assignedComplaints = await Complaint.find({
-        $or: [
-          { assignedStaffId: userId },
-          { assignedTo: { $regex: req.user.name || 'Staff', $options: 'i' } },
-          { status: { $in: ['open', 'assigned', 'in-progress', 'waiting-for-parts'] } }
-        ]
-      }).sort({ priority: -1, createdAt: -1 });
-
-      const roomsUnderMaintenance = await Room.countDocuments({ status: 'maintenance' });
-      const totalRooms = await Room.countDocuments();
+      const [assignedComplaints, roomsUnderMaintenance, totalRooms] = await Promise.all([
+        Complaint.find({
+          $or: [
+            { assignedStaffId: userId },
+            { status: { $in: ['open', 'assigned', 'in-progress', 'waiting-for-parts'] } }
+          ]
+        }).sort({ priority: -1, createdAt: -1 }).limit(15),
+        Room.countDocuments({ status: 'maintenance' }),
+        Room.countDocuments()
+      ]);
 
       return res.json({
         success: true,
@@ -207,60 +242,9 @@ export const getRecentActivities = async (req, res) => {
       });
     }
 
-    // Fallback if no logs yet: fetch latest real DB events
-    const latestInvoices = await Invoice.find({ status: 'paid' }).sort({ paidDate: -1 }).limit(2);
-    const latestComplaints = await Complaint.find().sort({ createdAt: -1 }).limit(2);
-    const latestNotices = await Notice.find().sort({ createdAt: -1 }).limit(2);
-    const latestTenants = await Tenant.find({ status: 'active' }).sort({ checkInDate: -1 }).limit(2);
-
-    const fallbackList = [];
-    latestInvoices.forEach(i => {
-      fallbackList.push({
-        id: i._id.toString(),
-        type: 'payment',
-        title: `Rent Payment: ₹${i.totalAmount.toLocaleString()}`,
-        description: `${i.tenantName} paid for ${i.month} via ${i.paymentMode}`,
-        timestamp: i.paidDate ? new Date(i.paidDate).toLocaleString() : 'Recently',
-        tag: 'Finance'
-      });
-    });
-
-    latestComplaints.forEach(c => {
-      fallbackList.push({
-        id: c._id.toString(),
-        type: 'complaint',
-        title: `Complaint: ${c.title}`,
-        description: `${c.tenantName} (Room ${c.roomNumber}) - ${c.category}`,
-        timestamp: new Date(c.createdAt).toLocaleString(),
-        tag: 'Maintenance'
-      });
-    });
-
-    latestNotices.forEach(n => {
-      fallbackList.push({
-        id: n._id.toString(),
-        type: 'notice',
-        title: `Notice: ${n.title}`,
-        description: n.content.substring(0, 60) + '...',
-        timestamp: new Date(n.createdAt).toLocaleString(),
-        tag: 'Announcement'
-      });
-    });
-
-    latestTenants.forEach(t => {
-      fallbackList.push({
-        id: t._id.toString(),
-        type: 'checkin',
-        title: `Tenant Checked In: ${t.name}`,
-        description: `Assigned to Room #${t.roomNumber}`,
-        timestamp: new Date(t.checkInDate).toLocaleString(),
-        tag: 'Occupancy'
-      });
-    });
-
     return res.json({
       success: true,
-      data: fallbackList
+      data: []
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

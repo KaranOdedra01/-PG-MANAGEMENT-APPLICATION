@@ -1,10 +1,8 @@
 import { z } from 'zod';
 
-// Reusable custom validators
+// Reusable custom validators - Strict MongoDB ObjectId validation
 const objectIdRegex = /^[0-9a-fA-F]{24}$/;
-export const zObjectId = z.string().refine((val) => objectIdRegex.test(val) || val.startsWith('usr_') || val.startsWith('mem_') || val.startsWith('room_'), {
-  message: 'Invalid ID format'
-});
+export const zObjectId = z.string().regex(objectIdRegex, 'Invalid MongoDB ObjectId format');
 
 // AUTH
 export const registerSchema = z.object({
@@ -22,6 +20,11 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(1, 'Password is required')
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(6, 'New password must be at least 6 characters')
 });
 
 export const createUserSchema = z.object({
@@ -67,7 +70,7 @@ export const onboardTenantSchema = z.object({
   email: z.string().email('Invalid email address'),
   phone: z.string().min(5, 'Phone number is required').trim(),
   roomId: z.string().min(1, 'Target room is required'),
-  password: z.string().min(6).optional().default('Password@123'),
+  password: z.string().min(6, 'Password must be at least 6 characters').optional(),
   securityDeposit: z.coerce.number().min(0).optional().default(10000),
   idProofType: z.enum(['Aadhaar', 'Passport', 'Driving License', 'College ID', 'Voter ID', 'Other']).optional().default('Aadhaar'),
   idProofNumber: z.string().optional().default(''),
@@ -115,7 +118,8 @@ export const generateMonthlyInvoicesSchema = z.object({
 
 export const recordPaymentSchema = z.object({
   paymentMode: z.enum(['UPI', 'Bank Transfer', 'Cash', 'Cheque', 'Card', 'Pending']).optional().default('UPI'),
-  transactionId: z.string().optional().default('')
+  transactionId: z.string().optional().default(''),
+  amountPaid: z.coerce.number().min(0).optional()
 });
 
 // EXPENSES
@@ -154,8 +158,7 @@ export const updateComplaintStatusSchema = z.object({
 });
 
 export const assignComplaintSchema = z.object({
-  assignedTo: z.string().min(1, 'Assignee name is required'),
-  assignedStaffId: z.string().optional()
+  assignedStaffId: z.string().regex(objectIdRegex, 'assignedStaffId must be a valid 24-character MongoDB ObjectId')
 });
 
 // NOTICES
@@ -199,7 +202,8 @@ export const updateMessMenuSchema = z.object({
 });
 
 export const toggleMealAttendanceSchema = z.object({
-  mealType: z.enum(['breakfast', 'lunch', 'dinner'])
+  mealType: z.enum(['breakfast', 'lunch', 'dinner']),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional()
 });
 
 export const updateMealPlanSchema = z.object({

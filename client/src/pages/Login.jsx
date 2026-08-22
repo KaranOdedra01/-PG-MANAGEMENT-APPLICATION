@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { Lock, Mail, Shield, User, Wrench, Sparkles, AlertCircle, ArrowRight } from 'lucide-react';
 
 export const Login = () => {
-  const [email, setEmail] = useState('admin@pg.com');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { login } = useAuth();

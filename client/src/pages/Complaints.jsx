@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
@@ -62,7 +62,8 @@ export const Complaints = () => {
     description: ''
   });
 
-  const [assigneeName, setAssigneeName] = useState('Ramesh Caretaker');
+  const [staffList, setStaffList] = useState([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('');
   const [resolutionNote, setResolutionNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
@@ -79,8 +80,23 @@ export const Complaints = () => {
     }
   };
 
+  const fetchStaffList = async () => {
+    try {
+      const res = await api.get('/auth/staff');
+      if (res.data?.success && res.data.data.length > 0) {
+        setStaffList(res.data.data);
+        setSelectedStaffId(res.data.data[0]._id);
+      }
+    } catch (err) {
+      console.error('Failed to load staff list:', err);
+    }
+  };
+
   useEffect(() => {
     fetchComplaints();
+    if (user?.role === 'admin' || user?.role === 'staff') {
+      fetchStaffList();
+    }
   }, [user]);
 
   // Counts for KPIs
@@ -131,13 +147,17 @@ export const Complaints = () => {
 
   const handleAssignSubmit = async (e) => {
     e.preventDefault();
+    if (!selectedStaffId) {
+      alert('Please select a staff member');
+      return;
+    }
     setSubmitting(true);
     try {
-      await api.patch('/complaints/' + selectedTicket._id + '/assign', { assignedTo: assigneeName });
+      await api.patch('/complaints/' + selectedTicket._id + '/assign', { assignedStaffId: selectedStaffId });
       setIsAssignOpen(false);
       fetchComplaints();
     } catch (err) {
-      alert('Failed to assign staff');
+      alert(err.response?.data?.message || 'Failed to assign staff');
     } finally {
       setSubmitting(false);
     }
@@ -577,15 +597,22 @@ export const Complaints = () => {
             <p className="text-xs text-slate-400">Assign ticket "{selectedTicket.title}" to a caretaker.</p>
             <form onSubmit={handleAssignSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Staff Member</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Select Verified Staff Member *</label>
                 <select
-                  value={assigneeName}
-                  onChange={(e) => setAssigneeName(e.target.value)}
+                  required
+                  value={selectedStaffId}
+                  onChange={(e) => setSelectedStaffId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="Ramesh Caretaker">Ramesh Caretaker</option>
-                  <option value="Suresh Electrician">Suresh Electrician</option>
-                  <option value="Karan Plumber">Karan Plumber</option>
+                  {staffList.length > 0 ? (
+                    staffList.map((s) => (
+                      <option key={s._id} value={s._id}>
+                        {s.name} ({s.role.toUpperCase()})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No active staff found</option>
+                  )}
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-2">

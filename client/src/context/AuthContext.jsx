@@ -54,6 +54,11 @@ export const AuthProvider = ({ children }) => {
     throw new Error(res.data.message || 'Registration failed');
   };
 
+  const updateUser = (userData) => {
+    localStorage.setItem('pg_user_data', JSON.stringify(userData));
+    setUser(userData);
+  };
+
   const logout = () => {
     localStorage.removeItem('pg_auth_token');
     localStorage.removeItem('pg_user_data');
@@ -61,7 +66,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, loading, login, register, updateUser, logout, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   );
