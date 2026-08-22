@@ -32,15 +32,17 @@ app.use(helmet({
 // Strict Environment-Based CORS Allowlist
 const rawOrigins = [
   config.clientUrl,
+  process.env.CLIENT_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'http://127.0.0.1:3000'
 ];
 
-const allowedOrigins = rawOrigins
+const allowedOrigins = [...new Set(rawOrigins
   .flatMap(url => (url ? url.split(',').map(s => s.trim().replace(/\/$/, '')) : []))
-  .filter(Boolean);
+  .filter(Boolean))];
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -49,8 +51,7 @@ app.use(cors({
       return callback(null, true);
     }
     const cleanOrigin = origin.replace(/\/$/, '');
-    const isVercelDomain = /^https:\/\/[a-zA-Z0-9._-]+\.vercel\.app$/.test(cleanOrigin);
-    if (allowedOrigins.includes(cleanOrigin) || isVercelDomain) {
+    if (allowedOrigins.includes(cleanOrigin)) {
       return callback(null, true);
     }
     return callback(new Error(`CORS Error: Origin ${origin} not allowed by Access-Control-Allow-Origin policy`));

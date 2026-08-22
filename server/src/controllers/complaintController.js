@@ -125,7 +125,6 @@ export const createComplaint = async (req, res) => {
       priority: priority.toLowerCase(),
       status: 'open',
       attachments,
-      assignedTo: 'Unassigned',
       assignedStaffId: null
     });
 

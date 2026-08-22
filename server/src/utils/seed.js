@@ -17,7 +17,7 @@ import Notification from '../models/Notification.js';
 
 dotenv.config();
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/pg_management';
+const MONGO_URI = process.env.MONGO_URI || (process.env.NODE_ENV === 'test' ? 'mongodb://127.0.0.1:27017/pg_management_test' : '');
 
 const getTodayDateString = (offsetDays = 0) => {
   const d = new Date();
@@ -31,6 +31,9 @@ const getTodayDateString = (offsetDays = 0) => {
 export const seedDatabase = async (keepConnected = false) => {
   try {
     if (mongoose.connection.readyState !== 1) {
+      if (!MONGO_URI) {
+        throw new Error('MONGO_URI is required for database seeding. Please set MONGO_URI in your environment.');
+      }
       console.log('🔄 Connecting to MongoDB for seeding...');
       await mongoose.connect(MONGO_URI);
       console.log('✅ Connected to MongoDB:', mongoose.connection.name);
@@ -418,7 +421,6 @@ export const seedDatabase = async (keepConnected = false) => {
       category: 'electrical',
       priority: 'high',
       status: 'assigned',
-      assignedTo: 'Ramesh Caretaker',
       assignedStaffId: staffUser._id,
       assignedAt: new Date()
     });
@@ -432,7 +434,7 @@ export const seedDatabase = async (keepConnected = false) => {
       category: 'internet',
       priority: 'medium',
       status: 'open',
-      assignedTo: 'Unassigned'
+      assignedStaffId: null
     });
 
     // 10. Create Notices

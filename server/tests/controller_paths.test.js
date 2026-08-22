@@ -6,7 +6,7 @@ import { validateEnv } from '../src/config/env.js';
 describe('Controller Paths & Business Logic Deep Verification', () => {
 
   describe('A. Complaint Assignment Controller Logic', () => {
-    it('should assign complaint to valid active staff and keep assignedTo in sync with staffUser.name', () => {
+    it('should assign complaint to valid active staff authoritatively setting assignedStaffId', () => {
       const staffUser = {
         _id: '66c1a0010000000000000010',
         name: 'Ramesh Staff',
@@ -20,15 +20,13 @@ describe('Controller Paths & Business Logic Deep Verification', () => {
         tenantId: '66c1a0010000000000000002',
         title: 'Water tap leaking',
         status: 'open',
-        assignedTo: 'Unassigned',
         assignedStaffId: null,
         assignedAt: null
       };
 
-      // Simulated controller logic
+      // Simulated controller logic: authoritative relationship assignedStaffId -> User
       if (staffUser && (staffUser.role === 'staff' || staffUser.role === 'admin') && staffUser.isActive) {
         complaint.assignedStaffId = staffUser._id;
-        complaint.assignedTo = staffUser.name;
         complaint.assignedAt = new Date();
         if (complaint.status === 'open') {
           complaint.status = 'assigned';
@@ -36,7 +34,6 @@ describe('Controller Paths & Business Logic Deep Verification', () => {
       }
 
       assert.equal(complaint.assignedStaffId, staffUser._id);
-      assert.equal(complaint.assignedTo, 'Ramesh Staff');
       assert.equal(complaint.status, 'assigned');
       assert.ok(complaint.assignedAt instanceof Date);
     });

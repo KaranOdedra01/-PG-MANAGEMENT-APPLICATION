@@ -143,7 +143,7 @@ export const Reports = () => {
         'Room #' + c.roomNumber,
         c.priority.toUpperCase(),
         c.status.toUpperCase(),
-        c.assignedStaffId?.name || c.assignedTo || 'Unassigned'
+        c.assignedStaffId?.name || 'Unassigned'
       ]);
 
       autoTable(doc, {
@@ -443,7 +443,7 @@ export const Reports = () => {
                           {c.status}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-slate-400">{c.assignedTo || 'Unassigned'}</td>
+                      <td className="py-3 px-4 text-slate-400">{c.assignedStaffId?.name || 'Unassigned'}</td>
                     </tr>
                   ))}
                 </tbody>

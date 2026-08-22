@@ -86,5 +86,30 @@ describe('Authentication & Authorization Security Tests', () => {
       assert.equal(jsonResponse?.success, false);
       assert.match(jsonResponse?.message, /Access denied/);
     });
+
+    it('should reject tenant attempting to access staff list with 403', () => {
+      const req = { user: { _id: '789', role: 'tenant' } };
+      let statusCode = null;
+      let jsonResponse = null;
+      let nextCalled = false;
+
+      const res = {
+        status: (code) => {
+          statusCode = code;
+          return {
+            json: (data) => { jsonResponse = data; }
+          };
+        }
+      };
+      const next = () => { nextCalled = true; };
+
+      const authMiddleware = authorize('admin', 'staff');
+      authMiddleware(req, res, next);
+
+      assert.equal(nextCalled, false);
+      assert.equal(statusCode, 403);
+      assert.equal(jsonResponse?.success, false);
+      assert.match(jsonResponse?.message, /Access denied/);
+    });
   });
 });

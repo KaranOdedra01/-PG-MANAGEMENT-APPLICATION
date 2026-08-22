@@ -10,7 +10,7 @@ router.post('/register', validate(registerSchema), register);
 router.post('/login', validate(loginSchema), login);
 router.post('/change-password', protect, validate(changePasswordSchema), changePassword);
 router.post('/users', protect, authorize('admin'), validate(createUserSchema), createPrivilegedUser);
-router.get('/staff', protect, getStaffList);
+router.get('/staff', protect, authorize('admin', 'staff'), getStaffList);
 router.get('/me', protect, getMe);
 router.get('/demo-accounts', getDemoAccounts);
 
