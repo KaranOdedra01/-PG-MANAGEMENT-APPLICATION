@@ -35,7 +35,9 @@ const isProduction = config.nodeEnv === 'production' || process.env.NODE_ENV ===
 const productionOrigins = [
   config.clientUrl,
   process.env.CLIENT_URL,
-  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+  'https://pg-management-application.vercel.app'
 ];
 
 const developmentOrigins = [

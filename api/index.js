@@ -11,7 +11,9 @@ export default async function handler(req, res) {
   const allowedOriginList = [
     config.clientUrl,
     process.env.CLIENT_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+    'https://pg-management-application.vercel.app',
     !isProd ? 'http://localhost:5173' : null,
     !isProd ? 'http://127.0.0.1:5173' : null,
     !isProd ? 'http://localhost:3000' : null,
