@@ -51,15 +51,11 @@ const complaintSchema = new mongoose.Schema({
     default: 'open',
     index: true 
   },
-  assignedTo: { 
-    type: String, 
-    default: 'Unassigned',
-    trim: true 
-  },
   assignedStaffId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    default: null
+    default: null,
+    index: true
   },
   assignedAt: { type: Date, default: null },
   resolvedAt: { type: Date, default: null },
@@ -69,7 +65,19 @@ const complaintSchema = new mongoose.Schema({
   actualCost: { type: Number, default: 0, min: 0 },
   tenantConfirmed: { type: Boolean, default: false },
   attachments: [{ type: String }]
-}, { timestamps: true });
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Authoritative virtual: staff name dynamically derived from referenced User
+complaintSchema.virtual('assignedTo').get(function() {
+  if (this.assignedStaffId && typeof this.assignedStaffId === 'object' && this.assignedStaffId.name) {
+    return this.assignedStaffId.name;
+  }
+  return 'Unassigned';
+});
 
 complaintSchema.pre('save', function(next) {
   if (!this.ticketNumber) {
@@ -79,4 +87,3 @@ complaintSchema.pre('save', function(next) {
 });
 
 export default mongoose.models.Complaint || mongoose.model('Complaint', complaintSchema);
-

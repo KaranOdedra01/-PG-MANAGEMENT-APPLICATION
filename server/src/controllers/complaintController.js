@@ -240,7 +240,6 @@ export const assignComplaint = async (req, res) => {
     }
 
     complaint.assignedStaffId = staffUser._id;
-    complaint.assignedTo = staffUser.name;
     complaint.assignedAt = new Date();
     if (complaint.status === 'open') {
       complaint.status = 'assigned';

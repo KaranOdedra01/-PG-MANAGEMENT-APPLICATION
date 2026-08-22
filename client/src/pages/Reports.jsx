@@ -143,7 +143,7 @@ export const Reports = () => {
         'Room #' + c.roomNumber,
         c.priority.toUpperCase(),
         c.status.toUpperCase(),
-        c.assignedTo || 'Unassigned'
+        c.assignedStaffId?.name || c.assignedTo || 'Unassigned'
       ]);
 
       autoTable(doc, {
