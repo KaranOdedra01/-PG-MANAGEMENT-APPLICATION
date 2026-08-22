@@ -28,11 +28,13 @@ const getTodayDateString = (offsetDays = 0) => {
   return `${year}-${month}-${day}`;
 };
 
-export const seedDatabase = async () => {
+export const seedDatabase = async (keepConnected = false) => {
   try {
-    console.log('🔄 Connecting to MongoDB for seeding...');
-    await mongoose.connect(MONGO_URI);
-    console.log('✅ Connected to MongoDB:', mongoose.connection.name);
+    if (mongoose.connection.readyState !== 1) {
+      console.log('🔄 Connecting to MongoDB for seeding...');
+      await mongoose.connect(MONGO_URI);
+      console.log('✅ Connected to MongoDB:', mongoose.connection.name);
+    }
 
     // 1. Clear existing collections
     console.log('🧹 Clearing existing collections...');
@@ -625,19 +627,29 @@ export const seedDatabase = async () => {
     console.log('🛠️ Staff:  staff@pg.com  / Password@123');
     console.log('🎓 Tenant: tenant@pg.com / Password@123');
     console.log('🎓 Tenant: priya@gmail.com / Password@123');
-    console.log('🎓 Tenant: aman@gmail.com / Password@123');
-    console.log('=============================================\n');
-
-    if (process.env.NODE_ENV !== 'test') {
+    if (!keepConnected && process.env.NODE_ENV !== 'test') {
       await mongoose.disconnect();
     }
     return true;
   } catch (error) {
     console.error('❌ Seeding error:', error.message);
-    if (process.env.NODE_ENV !== 'test') {
+    if (!keepConnected && process.env.NODE_ENV !== 'test') {
       process.exit(1);
     }
     throw error;
+  }
+};
+
+export const autoSeedIfEmpty = async () => {
+  try {
+    const userCount = await User.countDocuments();
+    if (userCount === 0) {
+      console.log('🌱 Database is empty. Auto-seeding initial demo data...');
+      await seedDatabase(true);
+      console.log('✅ Auto-seed completed successfully.');
+    }
+  } catch (err) {
+    console.error('Auto-seed check failed:', err.message);
   }
 };
 

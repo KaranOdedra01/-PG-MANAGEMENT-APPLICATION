@@ -1,6 +1,7 @@
 import app from '../server/src/server.js';
 import { connectDB } from '../server/src/config/db.js';
-import { validateEnv } from '../server/src/config/env.js';
+import { validateEnv, config } from '../server/src/config/env.js';
+import { autoSeedIfEmpty } from '../server/src/utils/seed.js';
 
 let isDbConnected = false;
 
@@ -19,6 +20,9 @@ export default async function handler(req, res) {
     if (!isDbConnected) {
       validateEnv();
       await connectDB();
+      if (config.demoMode) {
+        await autoSeedIfEmpty();
+      }
       isDbConnected = true;
     }
     return app(req, res);

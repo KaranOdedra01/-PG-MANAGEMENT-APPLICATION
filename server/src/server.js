@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { validateEnv, config } from './config/env.js';
 import { connectDB } from './config/db.js';
+import { autoSeedIfEmpty } from './utils/seed.js';
 
 import authRoutes from './routes/authRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
@@ -197,6 +198,9 @@ export const startServer = async () => {
   try {
     validateEnv();
     await connectDB();
+    if (config.demoMode) {
+      await autoSeedIfEmpty();
+    }
     const server = app.listen(config.port, () => {
       console.log(`🚀 PG Management Server running on http://localhost:${config.port}`);
     });
