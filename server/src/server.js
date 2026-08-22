@@ -48,7 +48,8 @@ app.use(cors({
       return callback(null, true);
     }
     const cleanOrigin = origin.replace(/\/$/, '');
-    if (allowedOrigins.includes(cleanOrigin)) {
+    const isVercelDomain = /^https:\/\/[a-zA-Z0-9._-]+\.vercel\.app$/.test(cleanOrigin);
+    if (allowedOrigins.includes(cleanOrigin) || isVercelDomain) {
       return callback(null, true);
     }
     return callback(new Error(`CORS Error: Origin ${origin} not allowed by Access-Control-Allow-Origin policy`));
