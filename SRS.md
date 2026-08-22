@@ -96,7 +96,7 @@ Google Gemini API (@google/generative-ai)
 
 5. **Complaints & Maintenance State Machine**:
    - Valid transition matrix: `open` ➔ `assigned` ➔ `in-progress` ➔ `waiting-for-parts` ➔ `resolved` ➔ `closed`.
-   - Verified staff assignment checking active staff user accounts.
+   - Verified staff assignment checking active staff user accounts (`assignedStaffId -> User` authoritative relationship; `assignedTo` is a virtual getter derived dynamically from `assignedStaffId.name`).
    - Timestamps: `assignedAt`, `resolvedAt`, `closedAt`.
 
 6. **Date-Specific Mess Management**:
@@ -124,7 +124,7 @@ Google Gemini API (@google/generative-ai)
 - **`Tenant`**: `userId`, `roomId`, `roomNumber`, `bedNumber`, `name`, `email`, `phone`, `checkInDate`, `checkOutDate`, `securityDeposit`, `monthlyRent`, `idProofType`, `idProofNumber`, `emergencyContact`, `status`, `isActive`, `deletedAt`.
 - **`Invoice`**: `tenantId`, `tenantName`, `roomNumber`, `invoiceNumber`, `month`, `baseRent`, `electricityCharge`, `maintenanceFee`, `messFee`, `lateFee`, `discount`, `totalAmount`, `status`, `dueDate`, `paidDate`, `paymentMode`, `transactionId`.
 - **`Expense`**: `category`, `amount`, `description`, `date`, `paymentMode`, `receiptRef`, `addedBy`.
-- **`Complaint`**: `ticketNumber`, `tenantId`, `tenantName`, `roomNumber`, `title`, `description`, `category`, `priority`, `status`, `assignedTo`, `assignedStaffId`, `assignedAt`, `resolvedAt`, `closedAt`, `resolutionNote`, `actualCost`.
+- **`Complaint`**: `ticketNumber`, `tenantId`, `tenantName`, `roomNumber`, `title`, `description`, `category`, `priority`, `status`, `assignedStaffId (ref: User)`, `assignedAt`, `resolvedAt`, `closedAt`, `resolutionNote`, `actualCost`, `attachments` (Virtual: `assignedTo` derived dynamically from `assignedStaffId.name`).
 - **`Notice`**: `title`, `content`, `category`, `priority`, `targetRoles`, `postedBy`, `isPinned`, `readBy`.
 - **`MessMenu`**: `day`, `breakfast`, `lunch`, `snacks`, `dinner`, `specialNote`.
 - **`MealSubscription`**: `userId`, `plan`, `monthlyCharge`, `diet`, `isActive`.

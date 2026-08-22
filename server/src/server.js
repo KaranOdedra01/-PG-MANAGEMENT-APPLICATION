@@ -30,15 +30,24 @@ app.use(helmet({
 }));
 
 // Strict Environment-Based CORS Allowlist
-const rawOrigins = [
+const isProduction = config.nodeEnv === 'production' || process.env.NODE_ENV === 'production';
+
+const productionOrigins = [
   config.clientUrl,
   process.env.CLIENT_URL,
-  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
+];
+
+const developmentOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'http://127.0.0.1:3000'
 ];
+
+const rawOrigins = isProduction
+  ? productionOrigins
+  : [...productionOrigins, ...developmentOrigins];
 
 const allowedOrigins = [...new Set(rawOrigins
   .flatMap(url => (url ? url.split(',').map(s => s.trim().replace(/\/$/, '')) : []))
