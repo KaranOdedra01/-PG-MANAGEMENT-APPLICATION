@@ -55,17 +55,24 @@ export const AIAssistant = () => {
   const [composerTenant, setComposerTenant] = useState('Rahul Sharma');
   const [composerRoom, setComposerRoom] = useState('102');
   const [composerAmount, setComposerAmount] = useState('7500');
-  const [composerMonth, setComposerMonth] = useState('September 2026');
   const [composerResult, setComposerResult] = useState(null);
   const [composerLoading, setComposerLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const chatContainerRef = useRef(null);
 
-  const scrollToBottom = () => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (smooth = true) => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto'
+      });
+    }
   };
 
   useEffect(() => {
-    scrollToBottom();
+    if (messages.length > 1) {
+      scrollToBottom(true);
+    }
   }, [messages, chatLoading]);
 
   const handleSendMessage = async (customText) => {
@@ -241,7 +248,7 @@ export const AIAssistant = () => {
           </div>
 
           {/* Chat Messages Feed */}
-          <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 scrollbar-none">
             {messages.map((msg, index) => {
               const isAi = msg.sender === 'ai';
               return (
