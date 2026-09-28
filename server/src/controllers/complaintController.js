@@ -3,6 +3,7 @@ import User from '../models/User.js';
 import Tenant from '../models/Tenant.js';
 import Notification from '../models/Notification.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { escapeRegex, isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 // Valid complaint lifecycle state transition matrix
 const validTransitions = {
@@ -42,7 +43,7 @@ export const getComplaints = async (req, res) => {
       query.category = category;
     }
     if (search) {
-      const q = search.trim();
+      const q = escapeRegex(search);
       query.$or = [
         { title: { $regex: q, $options: 'i' } },
         { description: { $regex: q, $options: 'i' } },
@@ -69,7 +70,7 @@ export const getComplaints = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch complaints');
   }
 };
 
@@ -79,6 +80,10 @@ export const getComplaints = async (req, res) => {
 export const getComplaintById = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
     const complaint = await Complaint.findById(id).populate('assignedStaffId', 'name email role phone');
 
     if (!complaint) {
@@ -98,7 +103,7 @@ export const getComplaintById = async (req, res) => {
       data: complaint
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch complaint');
   }
 };
 
@@ -142,7 +147,7 @@ export const createComplaint = async (req, res) => {
       data: complaint
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to create complaint');
   }
 };
 
@@ -152,6 +157,10 @@ export const createComplaint = async (req, res) => {
 export const updateComplaintStatus = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
     const { status, resolutionNote = '', actualCost = 0 } = req.body;
 
     const complaint = await Complaint.findById(id);
@@ -206,7 +215,7 @@ export const updateComplaintStatus = async (req, res) => {
       data: complaint
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to update complaint status');
   }
 };
 
@@ -216,12 +225,16 @@ export const updateComplaintStatus = async (req, res) => {
 export const assignComplaint = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
     const { assignedStaffId } = req.body;
 
-    if (!assignedStaffId) {
+    if (!assignedStaffId || !isValidObjectId(assignedStaffId)) {
       return res.status(400).json({
         success: false,
-        message: 'assignedStaffId is required'
+        message: 'Valid assignedStaffId is required'
       });
     }
 
@@ -269,7 +282,7 @@ export const assignComplaint = async (req, res) => {
       data: complaint
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to assign complaint');
   }
 };
 
@@ -279,6 +292,10 @@ export const assignComplaint = async (req, res) => {
 export const deleteComplaint = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
     const complaint = await Complaint.findById(id);
 
     if (!complaint) {
@@ -300,6 +317,6 @@ export const deleteComplaint = async (req, res) => {
       message: 'Complaint deleted successfully'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to delete complaint');
   }
 };

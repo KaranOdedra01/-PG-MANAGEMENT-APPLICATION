@@ -17,7 +17,7 @@ router.get('/', protect, getInvoices);
 router.get('/:id', protect, getInvoiceById);
 router.post('/', protect, authorize('admin'), validate(createInvoiceSchema), createInvoice);
 router.post('/generate-monthly', protect, authorize('admin'), validate(generateMonthlyInvoicesSchema), generateMonthlyInvoices);
-router.patch('/:id/pay', protect, validate(recordPaymentSchema), recordPayment);
+router.patch('/:id/pay', protect, authorize('admin', 'staff'), validate(recordPaymentSchema), recordPayment);
 router.delete('/:id', protect, authorize('admin'), deleteInvoice);
 
 export default router;

@@ -126,7 +126,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-// Health Check Endpoint (Real MongoDB Connection Verification)
+// Health Check Endpoint (Safe MongoDB Connection Verification)
 app.get('/api/health', (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   const status = isDbConnected ? 'healthy' : 'unhealthy';
@@ -135,14 +135,8 @@ app.get('/api/health', (req, res) => {
   return res.status(httpStatus).json({
     status,
     timestamp: new Date().toISOString(),
-    service: 'PG Management System API v2.0',
-    environment: config.nodeEnv,
-    database: {
-      status: isDbConnected ? 'connected' : 'disconnected',
-      host: mongoose.connection.host || 'unavailable',
-      name: mongoose.connection.name || 'unavailable'
-    },
-    geminiEnabled: !!config.geminiApiKey
+    service: 'PG Management System API',
+    database: isDbConnected ? 'connected' : 'disconnected'
   });
 });
 
@@ -150,7 +144,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api', (req, res) => {
   res.json({
     success: true,
-    message: '🏠 PG Management System Backend API v2.0',
+    message: '🏠 PG Management System Backend API',
     endpoints: {
       auth: '/api/auth',
       dashboard: '/api/dashboard',
@@ -192,17 +186,28 @@ app.use((err, req, res, next) => {
     });
   }
 
+  // Handle Mongoose CastError (invalid ObjectId) cleanly
+  if (err.name === 'CastError' && err.kind === 'ObjectId') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid ID format'
+    });
+  }
+
+  const isProd = config.nodeEnv === 'production' || process.env.NODE_ENV === 'production';
   const statusCode = err.statusCode || (res.statusCode === 200 ? 500 : res.statusCode);
   
-  if (config.nodeEnv !== 'production') {
-    console.error('Unhandled Error:', err.stack || err.message);
-  }
+  console.error('Unhandled Error:', err.stack || err.message);
+
+  const safeMessage = isProd && statusCode >= 500
+    ? 'Internal server error. Please try again later.'
+    : (err.message || 'Internal Server Error');
 
   res.status(statusCode).json({
     success: false,
-    message: err.message || 'Internal Server Error',
+    message: safeMessage,
     errors: err.errors || undefined,
-    ...(config.nodeEnv !== 'production' && { stack: err.stack })
+    ...(!isProd && { stack: err.stack })
   });
 });
 
@@ -210,7 +215,7 @@ export const startServer = async () => {
   try {
     validateEnv();
     await connectDB();
-    if (config.demoMode) {
+    if (!isProduction && config.demoMode) {
       await autoSeedIfEmpty();
     }
     const server = app.listen(config.port, () => {

@@ -1,6 +1,7 @@
 import Expense from '../models/Expense.js';
 import Invoice from '../models/Invoice.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { escapeRegex, isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get all expenses with Pagination, Filters & Search
 // @route   GET /api/expenses
@@ -19,7 +20,7 @@ export const getExpenses = async (req, res) => {
     }
 
     if (search) {
-      const q = search.trim();
+      const q = escapeRegex(search);
       query.$or = [
         { description: { $regex: q, $options: 'i' } },
         { category: { $regex: q, $options: 'i' } },
@@ -53,7 +54,7 @@ export const getExpenses = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch expenses');
   }
 };
 
@@ -119,7 +120,7 @@ export const getExpenseSummary = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch expense summary');
   }
 };
 
@@ -154,7 +155,7 @@ export const createExpense = async (req, res) => {
       data: expense
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to create expense');
   }
 };
 
@@ -164,6 +165,10 @@ export const createExpense = async (req, res) => {
 export const updateExpense = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Expense not found' });
+    }
+
     const { category, amount, description, date, paymentMode, receiptRef } = req.body;
 
     const expense = await Expense.findById(id);
@@ -194,7 +199,7 @@ export const updateExpense = async (req, res) => {
       data: expense
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to update expense');
   }
 };
 
@@ -204,6 +209,10 @@ export const updateExpense = async (req, res) => {
 export const deleteExpense = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Expense not found' });
+    }
+
     const expense = await Expense.findById(id);
 
     if (!expense) {
@@ -225,6 +234,6 @@ export const deleteExpense = async (req, res) => {
       message: 'Expense record deleted successfully'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to delete expense');
   }
 };

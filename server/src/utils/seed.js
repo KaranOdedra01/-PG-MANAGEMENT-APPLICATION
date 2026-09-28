@@ -644,6 +644,11 @@ export const seedDatabase = async (keepConnected = false) => {
 
 export const autoSeedIfEmpty = async () => {
   try {
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+    if (isProd) {
+      console.log('🔒 Production environment detected: auto-seeding is strictly disabled.');
+      return;
+    }
     const userCount = await User.countDocuments();
     if (userCount === 0) {
       console.log('🌱 Database is empty. Auto-seeding initial demo data...');

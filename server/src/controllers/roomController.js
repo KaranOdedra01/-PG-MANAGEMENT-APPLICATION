@@ -1,5 +1,6 @@
 import Room from '../models/Room.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { escapeRegex, isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get all rooms with search & filters
 // @route   GET /api/rooms
@@ -19,11 +20,13 @@ export const getRooms = async (req, res) => {
       query.type = type;
     }
     if (search) {
-      query.roomNumber = { $regex: search.trim(), $options: 'i' };
+      query.roomNumber = { $regex: escapeRegex(search), $options: 'i' };
     }
 
+    // Privacy Guard: Tenants cannot see contact info (email/phone) of other tenants
+    const tenantSelect = req.user.role === 'tenant' ? 'name avatar' : 'name email phone avatar';
     const rooms = await Room.find(query)
-      .populate('tenants', 'name email phone avatar')
+      .populate('tenants', tenantSelect)
       .sort({ floor: 1, roomNumber: 1 });
 
     return res.json({
@@ -32,7 +35,7 @@ export const getRooms = async (req, res) => {
       data: rooms
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch rooms');
   }
 };
 
@@ -42,7 +45,13 @@ export const getRooms = async (req, res) => {
 export const getRoomById = async (req, res) => {
   try {
     const { id } = req.params;
-    const room = await Room.findById(id).populate('tenants', 'name email phone avatar');
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Room not found' });
+    }
+
+    // Privacy Guard: Tenants cannot see contact info (email/phone) of other tenants
+    const tenantSelect = req.user.role === 'tenant' ? 'name avatar' : 'name email phone avatar';
+    const room = await Room.findById(id).populate('tenants', tenantSelect);
 
     if (!room) {
       return res.status(404).json({ success: false, message: 'Room not found' });
@@ -53,7 +62,7 @@ export const getRoomById = async (req, res) => {
       data: room
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch room');
   }
 };
 
@@ -122,6 +131,10 @@ export const createRoom = async (req, res) => {
 export const updateRoom = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Room not found' });
+    }
+
     const { roomNumber, floor, type, capacity, rent, status, amenities } = req.body;
 
     const room = await Room.findById(id);
@@ -143,9 +156,21 @@ export const updateRoom = async (req, res) => {
     if (floor !== undefined) room.floor = Number(floor);
     if (type) room.type = type;
     if (rent !== undefined) room.rent = Number(rent);
-    if (status) room.status = status;
+
+    // Maintenance Safety Guard: Occupied rooms cannot be set to maintenance via PUT or PATCH
+    if (status) {
+      if (status === 'maintenance' && room.occupiedBeds > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot put room under maintenance while tenants are occupied. Please reallocate tenants first.'
+        });
+      }
+      room.status = status;
+    }
+
     if (amenities) room.amenities = Array.isArray(amenities) ? amenities : [];
 
+    // Capacity & Bed Consistency Synchronization
     if (capacity !== undefined) {
       const newCapacity = Number(capacity);
       if (newCapacity < room.occupiedBeds) {
@@ -154,7 +179,35 @@ export const updateRoom = async (req, res) => {
           message: `Cannot reduce capacity to ${newCapacity} because ${room.occupiedBeds} beds are currently occupied.`
         });
       }
-      room.capacity = newCapacity;
+
+      if (newCapacity !== room.capacity) {
+        if (!Array.isArray(room.beds)) room.beds = [];
+
+        if (newCapacity > room.beds.length) {
+          const existingLabels = new Set(room.beds.map(b => b.bedNumber));
+          let charCode = 65; // 'A'
+          while (room.beds.length < newCapacity) {
+            const candidate = `Bed ${String.fromCharCode(charCode)}`;
+            charCode++;
+            if (!existingLabels.has(candidate)) {
+              room.beds.push({
+                bedNumber: candidate,
+                isOccupied: false,
+                tenantId: null
+              });
+              existingLabels.add(candidate);
+            }
+          }
+        } else if (newCapacity < room.beds.length) {
+          // Safely prune unoccupied beds from the tail
+          for (let i = room.beds.length - 1; i >= 0 && room.beds.length > newCapacity; i--) {
+            if (!room.beds[i].isOccupied) {
+              room.beds.splice(i, 1);
+            }
+          }
+        }
+        room.capacity = newCapacity;
+      }
     }
 
     await room.save();
@@ -173,7 +226,7 @@ export const updateRoom = async (req, res) => {
       data: room
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to update room');
   }
 };
 
@@ -183,6 +236,10 @@ export const updateRoom = async (req, res) => {
 export const toggleRoomStatus = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Room not found' });
+    }
+
     const { status } = req.body;
 
     const room = await Room.findById(id);
@@ -214,7 +271,7 @@ export const toggleRoomStatus = async (req, res) => {
       data: room
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to update room status');
   }
 };
 
@@ -224,6 +281,10 @@ export const toggleRoomStatus = async (req, res) => {
 export const deleteRoom = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Room not found' });
+    }
+
     const room = await Room.findById(id);
 
     if (!room) {
@@ -252,6 +313,6 @@ export const deleteRoom = async (req, res) => {
       message: `Room ${room.roomNumber} deleted successfully`
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to delete room');
   }
 };

@@ -1,6 +1,7 @@
 import { MessMenu, MealSubscription, MealAttendance } from '../models/Mess.js';
 import User from '../models/User.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { handleControllerError } from '../utils/sanitize.js';
 
 const defaultDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -25,7 +26,7 @@ export const getWeeklyMenu = async (req, res) => {
       data: menu
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'fetching mess menu');
   }
 };
 
@@ -63,7 +64,7 @@ export const updateWeeklyMenu = async (req, res) => {
       data: menuItem
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'updating mess menu');
   }
 };
 
@@ -128,7 +129,7 @@ export const getMealHeadcount = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'calculating meal headcount');
   }
 };
 
@@ -179,7 +180,7 @@ export const getMySubscription = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'fetching subscription');
   }
 };
 
@@ -226,7 +227,7 @@ export const toggleMealAttendance = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'toggling meal attendance');
   }
 };
 
@@ -269,6 +270,6 @@ export const updateMealPlan = async (req, res) => {
       data: sub
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'updating meal plan');
   }
 };

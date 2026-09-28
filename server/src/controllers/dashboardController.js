@@ -6,6 +6,7 @@ import Notice from '../models/Notice.js';
 import User from '../models/User.js';
 import Tenant from '../models/Tenant.js';
 import ActivityLog from '../models/ActivityLog.js';
+import { handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get Role-Tailored Dashboard Metrics (Optimized MongoDB Aggregations)
 // @route   GET /api/dashboard/stats
@@ -196,15 +197,23 @@ export const getDashboardStats = async (req, res) => {
 
     return res.status(400).json({ success: false, message: 'Invalid user role' });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch dashboard statistics');
   }
 };
 
 // @desc    Get Real Recent Activities from MongoDB ActivityLog
 // @route   GET /api/dashboard/activities
-// @access  Private
+// @access  Private (Admin & Staff; Tenants receive isolated safe empty feed)
 export const getRecentActivities = async (req, res) => {
   try {
+    // Privacy Guard: Tenants cannot see global activity logs (financials, onboarding, other tenant complaints)
+    if (req.user.role === 'tenant') {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
     const logs = await ActivityLog.find().sort({ createdAt: -1 }).limit(10);
 
     if (logs && logs.length > 0) {
@@ -247,6 +256,6 @@ export const getRecentActivities = async (req, res) => {
       data: []
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch recent activities');
   }
 };

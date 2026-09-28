@@ -2,6 +2,7 @@ import Notice from '../models/Notice.js';
 import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { escapeRegex, isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get all active notices (Role targeted)
 // @route   GET /api/notices
@@ -22,7 +23,7 @@ export const getNotices = async (req, res) => {
       query.priority = priority.toLowerCase();
     }
     if (search) {
-      const q = search.trim();
+      const q = escapeRegex(search);
       query.$or = [
         { title: { $regex: q, $options: 'i' } },
         { content: { $regex: q, $options: 'i' } }
@@ -38,7 +39,7 @@ export const getNotices = async (req, res) => {
       data: notices
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch notices');
   }
 };
 
@@ -48,6 +49,10 @@ export const getNotices = async (req, res) => {
 export const getNoticeById = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Notice not found' });
+    }
+
     const notice = await Notice.findById(id);
 
     if (!notice) {
@@ -59,7 +64,7 @@ export const getNoticeById = async (req, res) => {
       data: notice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch notice');
   }
 };
 
@@ -110,7 +115,7 @@ export const createNotice = async (req, res) => {
       data: notice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to broadcast notice');
   }
 };
 
@@ -120,6 +125,10 @@ export const createNotice = async (req, res) => {
 export const updateNotice = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Notice not found' });
+    }
+
     const { title, content, category, priority, targetRoles, isPinned } = req.body;
 
     const notice = await Notice.findById(id);
@@ -150,7 +159,7 @@ export const updateNotice = async (req, res) => {
       data: notice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to update notice');
   }
 };
 
@@ -160,6 +169,10 @@ export const updateNotice = async (req, res) => {
 export const acknowledgeNotice = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Notice not found' });
+    }
+
     const userId = req.user._id;
 
     const notice = await Notice.findById(id);
@@ -178,7 +191,7 @@ export const acknowledgeNotice = async (req, res) => {
       data: notice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to acknowledge notice');
   }
 };
 
@@ -188,6 +201,10 @@ export const acknowledgeNotice = async (req, res) => {
 export const deleteNotice = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Notice not found' });
+    }
+
     const notice = await Notice.findById(id);
 
     if (!notice) {
@@ -209,6 +226,6 @@ export const deleteNotice = async (req, res) => {
       message: 'Notice deleted successfully'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to delete notice');
   }
 };

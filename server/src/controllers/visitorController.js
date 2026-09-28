@@ -2,6 +2,7 @@ import Visitor from '../models/Visitor.js';
 import Tenant from '../models/Tenant.js';
 import Room from '../models/Room.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { isValidObjectId, escapeRegex, handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get all visitor logs with Pagination & Search
 // @route   GET /api/visitors
@@ -19,10 +20,10 @@ export const getVisitors = async (req, res) => {
       query.status = status;
     }
     if (type && type !== 'all') {
-      query.visitorType = { $regex: new RegExp(`^${type.trim()}$`, 'i') };
+      query.visitorType = { $regex: new RegExp(`^${escapeRegex(type.trim())}$`, 'i') };
     }
     if (search) {
-      const q = search.trim();
+      const q = escapeRegex(search.trim());
       query.$or = [
         { name: { $regex: q, $options: 'i' } },
         { phone: { $regex: q, $options: 'i' } },
@@ -49,7 +50,7 @@ export const getVisitors = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'fetching visitors');
   }
 };
 
@@ -70,7 +71,7 @@ export const getActiveVisitors = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'fetching active visitors');
   }
 };
 
@@ -80,6 +81,13 @@ export const getActiveVisitors = async (req, res) => {
 export const checkinVisitor = async (req, res) => {
   try {
     const { name, phone, visitorType = 'Friend', tenantName, roomNumber, purpose = 'Visit', vehicleNumber = '' } = req.body;
+
+    if (!name || !phone || !roomNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, phone number, and room number are required'
+      });
+    }
 
     const currentHour = new Date().getHours();
     const isLate = currentHour >= 21 || currentHour < 6; // 9:00 PM to 6:00 AM
@@ -110,7 +118,7 @@ export const checkinVisitor = async (req, res) => {
       tenantId: hostTenantId,
       tenantName: resolvedHostName,
       roomNumber: roomNumber.trim().toUpperCase(),
-      purpose: purpose.trim(),
+      purpose: purpose ? purpose.trim() : 'Visit',
       vehicleNumber: vehicleNumber ? vehicleNumber.trim() : '',
       entryTime: new Date(),
       exitTime: null,
@@ -133,7 +141,7 @@ export const checkinVisitor = async (req, res) => {
       data: visitor
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'checking in visitor');
   }
 };
 
@@ -143,6 +151,10 @@ export const checkinVisitor = async (req, res) => {
 export const checkoutVisitor = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Visitor entry not found' });
+    }
+
     const visitor = await Visitor.findById(id);
 
     if (!visitor) {
@@ -171,7 +183,7 @@ export const checkoutVisitor = async (req, res) => {
       data: visitor
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'checking out visitor');
   }
 };
 
@@ -181,6 +193,10 @@ export const checkoutVisitor = async (req, res) => {
 export const deleteVisitor = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Visitor not found' });
+    }
+
     const visitor = await Visitor.findById(id);
 
     if (!visitor) {
@@ -202,6 +218,6 @@ export const deleteVisitor = async (req, res) => {
       message: 'Visitor log deleted successfully'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'deleting visitor');
   }
 };

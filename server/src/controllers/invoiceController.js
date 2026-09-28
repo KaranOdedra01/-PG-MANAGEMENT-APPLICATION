@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { logActivity } from '../utils/activityLogger.js';
 import { withTransaction } from '../utils/transaction.js';
+import { escapeRegex, isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get Invoices with Pagination, Search & Role Protection
 // @route   GET /api/invoices
@@ -28,11 +29,11 @@ export const getInvoices = async (req, res) => {
     }
 
     if (month && month !== 'all') {
-      query.month = { $regex: month.trim(), $options: 'i' };
+      query.month = { $regex: escapeRegex(month), $options: 'i' };
     }
 
     if (search) {
-      const q = search.trim();
+      const q = escapeRegex(search);
       query.$or = [
         { tenantName: { $regex: q, $options: 'i' } },
         { roomNumber: { $regex: q, $options: 'i' } },
@@ -57,7 +58,7 @@ export const getInvoices = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch invoices');
   }
 };
 
@@ -67,6 +68,10 @@ export const getInvoices = async (req, res) => {
 export const getInvoiceById = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
     const invoice = await Invoice.findById(id);
 
     if (!invoice) {
@@ -86,7 +91,7 @@ export const getInvoiceById = async (req, res) => {
       data: invoice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch invoice');
   }
 };
 
@@ -107,23 +112,51 @@ export const createInvoice = async (req, res) => {
       dueDate 
     } = req.body;
 
-    // Find tenant details
-    const tenantUser = await User.findById(tenantId) || await Tenant.findOne({ userId: tenantId });
-    let tenantName = 'Tenant Resident';
-    let roomNumber = '101';
-    let targetUserId = tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: 'Tenant ID is required' });
+    }
+
+    // Find tenant details authoritatively without fake defaults
+    let tenantUser = null;
+    let tRecord = null;
+
+    if (isValidObjectId(tenantId)) {
+      tenantUser = await User.findById(tenantId);
+      if (!tenantUser) {
+        tRecord = await Tenant.findById(tenantId);
+      }
+      if (!tenantUser && !tRecord) {
+        tRecord = await Tenant.findOne({ userId: tenantId });
+      }
+    }
+
+    if (!tenantUser && !tRecord) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    let tenantName = '';
+    let roomNumber = '';
+    let targetUserId = null;
 
     if (tenantUser) {
       tenantName = tenantUser.name;
-      roomNumber = tenantUser.roomNumber || '101';
+      roomNumber = tenantUser.roomNumber;
       targetUserId = tenantUser._id;
-    } else {
-      const tRecord = await Tenant.findById(tenantId);
-      if (tRecord) {
-        tenantName = tRecord.name;
-        roomNumber = tRecord.roomNumber;
-        targetUserId = tRecord.userId;
+    } else if (tRecord) {
+      tenantName = tRecord.name;
+      roomNumber = tRecord.roomNumber;
+      targetUserId = tRecord.userId;
+    }
+
+    if (!roomNumber && targetUserId) {
+      const activeTenant = await Tenant.findOne({ userId: targetUserId, status: 'active' });
+      if (activeTenant) {
+        roomNumber = activeTenant.roomNumber;
       }
+    }
+
+    if (!roomNumber) {
+      return res.status(400).json({ success: false, message: 'Cannot create invoice: Tenant has no assigned room' });
     }
 
     const calculatedTotal = Math.max(0, 
@@ -175,7 +208,7 @@ export const createInvoice = async (req, res) => {
       data: invoice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to create invoice');
   }
 };
 
@@ -252,26 +285,33 @@ export const generateMonthlyInvoices = async (req, res) => {
       data: generated
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to generate monthly invoices');
   }
 };
 
 // @desc    Record Invoice Payment (Offline, UPI, Cash, Bank Transfer)
 // @route   PATCH /api/invoices/:id/pay
-// @access  Private (Admin, Staff, or Invoice Owner)
+// @access  Private (Admin & Staff Only)
 export const recordPayment = async (req, res) => {
   try {
     const { id } = req.params;
     const { paymentMode = 'UPI', transactionId = '', amountPaid } = req.body;
 
-    const invoice = await Invoice.findById(id);
-    if (!invoice) {
+    // Strict Authorization: Tenants cannot record payment
+    if (req.user.role === 'tenant') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Only admin and staff can record invoice payments'
+      });
+    }
+
+    if (!isValidObjectId(id)) {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
 
-    // Ownership check
-    if (req.user.role === 'tenant' && invoice.tenantId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ success: false, message: 'Cannot record payment for another tenant\'s invoice' });
+    const invoice = await Invoice.findById(id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
 
     if (invoice.status === 'paid') {
@@ -317,7 +357,7 @@ export const recordPayment = async (req, res) => {
       data: invoice
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to record payment');
   }
 };
 
@@ -327,6 +367,10 @@ export const recordPayment = async (req, res) => {
 export const deleteInvoice = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
     const invoice = await Invoice.findById(id);
 
     if (!invoice) {
@@ -348,6 +392,6 @@ export const deleteInvoice = async (req, res) => {
       message: 'Invoice deleted successfully'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to delete invoice');
   }
 };

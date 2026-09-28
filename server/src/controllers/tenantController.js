@@ -6,6 +6,7 @@ import Tenant from '../models/Tenant.js';
 import Notification from '../models/Notification.js';
 import { logActivity } from '../utils/activityLogger.js';
 import { withTransaction } from '../utils/transaction.js';
+import { escapeRegex, isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get all tenants with search, pagination & filters
 // @route   GET /api/tenants
@@ -23,10 +24,10 @@ export const getTenants = async (req, res) => {
       query.status = status;
     }
     if (roomNumber && roomNumber !== 'all') {
-      query.roomNumber = roomNumber.trim();
+      query.roomNumber = escapeRegex(roomNumber);
     }
     if (search) {
-      const q = search.trim();
+      const q = escapeRegex(search);
       query.$or = [
         { name: { $regex: q, $options: 'i' } },
         { email: { $regex: q, $options: 'i' } },
@@ -54,7 +55,7 @@ export const getTenants = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch tenants');
   }
 };
 
@@ -64,15 +65,15 @@ export const getTenants = async (req, res) => {
 export const getTenantById = async (req, res) => {
   try {
     const { id } = req.params;
-    let tenant;
+    let tenant = null;
 
-    if (mongoose.Types.ObjectId.isValid(id)) {
+    if (isValidObjectId(id)) {
       tenant = await Tenant.findById(id)
         .populate('roomId', 'roomNumber floor type rent amenities')
         .populate('userId', 'name email phone avatar isActive');
     }
 
-    if (!tenant) {
+    if (!tenant && isValidObjectId(id)) {
       // Fallback search by userId
       tenant = await Tenant.findOne({ userId: id })
         .populate('roomId', 'roomNumber floor type rent amenities')
@@ -96,7 +97,7 @@ export const getTenantById = async (req, res) => {
       data: tenant
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to fetch tenant profile');
   }
 };
 
@@ -117,6 +118,10 @@ export const onboardTenant = async (req, res) => {
       checkInDate,
       emergencyContact 
     } = req.body;
+
+    if (!roomId || !isValidObjectId(roomId)) {
+      return res.status(400).json({ success: false, message: 'Valid target roomId is required' });
+    }
 
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -179,23 +184,19 @@ export const onboardTenant = async (req, res) => {
         user = createdUsers[0];
       }
 
-      // 3. Find available bed in room
-      let assignedBed = 'Bed A';
-      if (room.beds && room.beds.length > 0) {
-        const freeBed = room.beds.find(b => !b.isOccupied);
-        if (freeBed) {
-          freeBed.isOccupied = true;
-          freeBed.tenantId = user._id;
-          assignedBed = freeBed.bedNumber;
-        }
-      } else {
-        // Auto initialize beds if empty
-        room.beds = [{
-          bedNumber: 'Bed A',
-          isOccupied: true,
-          tenantId: user._id
-        }];
+      // 3. Find available bed in room (Strict Consistency Guard: Real bed slot required)
+      if (!room.beds || room.beds.length === 0) {
+        throw new Error(`Room #${room.roomNumber} has no configured beds.`);
       }
+
+      const freeBed = room.beds.find(b => !b.isOccupied);
+      if (!freeBed) {
+        throw new Error(`Room #${room.roomNumber} has no available bed slots.`);
+      }
+
+      freeBed.isOccupied = true;
+      freeBed.tenantId = user._id;
+      const assignedBed = freeBed.bedNumber;
 
       // 4. Create Tenant Document
       const createdTenants = await Tenant.create([{
@@ -260,6 +261,10 @@ export const onboardTenant = async (req, res) => {
 export const updateTenant = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
     const { phone, securityDeposit, emergencyContact, idProofType, idProofNumber, status } = req.body;
 
     const tenant = await Tenant.findById(id);
@@ -295,7 +300,7 @@ export const updateTenant = async (req, res) => {
       data: tenant
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to update tenant');
   }
 };
 
@@ -305,6 +310,9 @@ export const updateTenant = async (req, res) => {
 export const checkoutTenant = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
 
     const tenant = await withTransaction(async (session) => {
       const tenantQuery = Tenant.findById(id);
@@ -372,6 +380,10 @@ export const checkoutTenant = async (req, res) => {
 export const deleteTenant = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
     const tenant = await Tenant.findById(id);
 
     if (!tenant) {
@@ -421,6 +433,6 @@ export const deleteTenant = async (req, res) => {
       message: `Tenant record for ${tenant.name} archived successfully`
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'Failed to delete tenant');
   }
 };

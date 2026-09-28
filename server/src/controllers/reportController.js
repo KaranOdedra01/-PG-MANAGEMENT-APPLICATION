@@ -4,6 +4,7 @@ import Expense from '../models/Expense.js';
 import Complaint from '../models/Complaint.js';
 import Tenant from '../models/Tenant.js';
 import Visitor from '../models/Visitor.js';
+import { handleControllerError } from '../utils/sanitize.js';
 
 // @desc    Get Consolidated Executive Summary (Pure MongoDB Aggregations)
 // @route   GET /api/reports/summary
@@ -114,7 +115,7 @@ export const getExecutiveSummary = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'generating executive summary');
   }
 };
 
@@ -177,7 +178,7 @@ export const getFinancialReport = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'generating financial report');
   }
 };
 
@@ -226,6 +227,6 @@ export const getOccupancyReport = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'generating occupancy report');
   }
 };

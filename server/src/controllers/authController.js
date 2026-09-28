@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { getJwtSecret, config } from '../config/env.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { isValidObjectId, handleControllerError } from '../utils/sanitize.js';
 
 const generateToken = (id, role) => {
   const secret = getJwtSecret();
@@ -16,6 +17,13 @@ const generateToken = (id, role) => {
 export const register = async (req, res) => {
   try {
     const { name, email, password, phone, emergencyContact } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email, and password are required'
+      });
+    }
 
     const normalizedEmail = email.toLowerCase().trim();
     const userExists = await User.findOne({ email: normalizedEmail });
@@ -62,7 +70,7 @@ export const register = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'user registration');
   }
 };
 
@@ -72,6 +80,11 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Email and password are required' });
+    }
+
     const normalizedEmail = email.toLowerCase().trim();
 
     const user = await User.findOne({ email: normalizedEmail }).select('+password');
@@ -107,7 +120,7 @@ export const login = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'login');
   }
 };
 
@@ -117,6 +130,10 @@ export const login = async (req, res) => {
 export const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
+    if (!req.user || !isValidObjectId(req.user._id)) {
+      return res.status(401).json({ success: false, message: 'Not authorized' });
+    }
+
     const user = await User.findById(req.user._id).select('+password');
 
     if (!user) {
@@ -146,7 +163,7 @@ export const changePassword = async (req, res) => {
       message: 'Password changed successfully'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'changing password');
   }
 };
 
@@ -156,6 +173,10 @@ export const changePassword = async (req, res) => {
 export const createPrivilegedUser = async (req, res) => {
   try {
     const { name, email, password, role, phone, emergencyContact } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, message: 'Name, email, and password are required' });
+    }
+
     const normalizedEmail = email.toLowerCase().trim();
 
     const userExists = await User.findOne({ email: normalizedEmail });
@@ -193,7 +214,7 @@ export const createPrivilegedUser = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'creating user');
   }
 };
 
@@ -202,6 +223,9 @@ export const createPrivilegedUser = async (req, res) => {
 // @access  Private
 export const getMe = async (req, res) => {
   try {
+    if (!req.user || !isValidObjectId(req.user._id)) {
+      return res.status(401).json({ success: false, message: 'Not authorized' });
+    }
     const user = await User.findById(req.user._id).select('-password');
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -211,7 +235,7 @@ export const getMe = async (req, res) => {
       data: user
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'fetching profile');
   }
 };
 
@@ -247,6 +271,6 @@ export const getStaffList = async (req, res) => {
       data: staff
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return handleControllerError(res, error, 'fetching staff list');
   }
 };

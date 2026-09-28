@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     if (!isDbConnected) {
       validateEnv();
       await connectDB();
-      if (config.demoMode) {
+      if (!isProd && config.demoMode) {
         await autoSeedIfEmpty();
       }
       isDbConnected = true;
@@ -44,6 +44,13 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('❌ Vercel Serverless Function DB Error:', error.message);
     
+    if (isProd) {
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error. Please try again later.'
+      });
+    }
+
     let help = 'Please verify your MONGO_URI in Vercel settings.';
     if (error.message.includes('bad auth') || error.message.includes('authentication failed')) {
       help = 'Authentication failed: Check your MongoDB Atlas username and password in MONGO_URI.';
