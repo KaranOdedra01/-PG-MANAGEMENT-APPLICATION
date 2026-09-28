@@ -7,8 +7,8 @@ import {
   Send, 
   User, 
   Zap, 
-  ShieldAlert, 
-  CheckCircle2, 
+  Key, 
+  ShieldCheck, 
   Copy, 
   Check, 
   MessageSquare, 
@@ -17,14 +17,12 @@ import {
   Flame, 
   Clock, 
   RefreshCw,
-  UtensilsCrossed,
-  Wifi,
-  DoorOpen,
-  DollarSign,
-  HeartPulse,
-  Package,
-  Dumbbell,
-  BookOpen
+  ExternalLink,
+  Trash2,
+  Settings,
+  X,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 
 export const AIAssistant = () => {
@@ -33,17 +31,29 @@ export const AIAssistant = () => {
 
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'classifier' | 'composer'
 
+  // AI Connection State
+  const [aiStatus, setAiStatus] = useState({ liveMode: false, activeModel: 'Gemini 1.5 Flash' });
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [customKeyInput, setCustomKeyInput] = useState('');
+  const [keySaveSuccess, setKeySaveSuccess] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
+
   // Chat State
   const [messages, setMessages] = useState([
     {
+      id: 'welcome-msg',
       sender: 'ai',
-      text: `Hello ${user?.name || 'Resident'}! 👋 I am your 24/7 PG Smart Assistant powered by Gemini. You can ask me anything about the hostel — like **"Where is the nearest hospital?"**, **"How do I connect to the WiFi?"**, today's meal schedule, gate closing curfew, laundry tokens, or rent dues!`,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      text: `Hello ${user?.name || 'Resident'}! 👋 I am your 24/7 PG Smart Assistant powered by Google Gemini.
+
+You can ask me real-time questions about the hostel (like **"What is for dinner today?"**, **"Where is the nearest hospital?"**, **"How do I connect to WiFi?"**, **"Check my rent dues"**) or ANY general questions (like study planning, coding, local guides, health tips)!`,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mode: 'Gemini AI'
     }
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const chatBottomRef = useRef(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const chatContainerRef = useRef(null);
 
   // Classifier State
   const [classifyTitle, setClassifyTitle] = useState('Bathroom geyser switch burning');
@@ -55,10 +65,58 @@ export const AIAssistant = () => {
   const [composerTenant, setComposerTenant] = useState('Rahul Sharma');
   const [composerRoom, setComposerRoom] = useState('102');
   const [composerAmount, setComposerAmount] = useState('7500');
+  const [composerMonth, setComposerMonth] = useState('Current Month');
+  const [composerDueDate, setComposerDueDate] = useState('');
   const [composerResult, setComposerResult] = useState(null);
   const [composerLoading, setComposerLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const chatContainerRef = useRef(null);
+  const [copiedLetter, setCopiedLetter] = useState(false);
+
+  // Load stored custom key & check AI status
+  useEffect(() => {
+    const storedKey = localStorage.getItem('gemini_custom_api_key') || '';
+    setCustomKeyInput(storedKey);
+    fetchAIStatus();
+  }, []);
+
+  const fetchAIStatus = async () => {
+    try {
+      const res = await api.get('/ai/status');
+      if (res.data?.success) {
+        setAiStatus(res.data);
+      }
+    } catch {
+      // Quiet fallback
+    }
+  };
+
+  const handleSaveCustomKey = async (e) => {
+    e.preventDefault();
+    setTestingKey(true);
+    try {
+      if (customKeyInput.trim()) {
+        localStorage.setItem('gemini_custom_api_key', customKeyInput.trim());
+      } else {
+        localStorage.removeItem('gemini_custom_api_key');
+      }
+      await fetchAIStatus();
+      setKeySaveSuccess(true);
+      setTimeout(() => {
+        setKeySaveSuccess(false);
+        setShowKeyModal(false);
+      }, 1200);
+    } catch {
+      alert('Failed to save API key');
+    } finally {
+      setTestingKey(false);
+    }
+  };
+
+  const handleClearKey = async () => {
+    localStorage.removeItem('gemini_custom_api_key');
+    setCustomKeyInput('');
+    await fetchAIStatus();
+    setShowKeyModal(false);
+  };
 
   const scrollToBottom = (smooth = true) => {
     if (chatContainerRef.current) {
@@ -75,11 +133,50 @@ export const AIAssistant = () => {
     }
   }, [messages, chatLoading]);
 
+  // Typewriter streaming effect for smooth real-time response rendering
+  const typeMessageStreaming = (fullText, modeTag) => {
+    const msgId = 'msg-' + Date.now();
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Initial placeholder message
+    setMessages(prev => [
+      ...prev,
+      {
+        id: msgId,
+        sender: 'ai',
+        text: '',
+        mode: modeTag || 'Gemini 1.5 Flash',
+        time: timeStr,
+        isStreaming: true
+      }
+    ]);
+
+    const words = fullText.split(' ');
+    let currentWordIndex = 0;
+    let accumulated = '';
+
+    const interval = setInterval(() => {
+      if (currentWordIndex < words.length) {
+        accumulated += (currentWordIndex === 0 ? '' : ' ') + words[currentWordIndex];
+        currentWordIndex += 1;
+
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: accumulated } : m));
+        scrollToBottom(false);
+      } else {
+        clearInterval(interval);
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isStreaming: false } : m));
+        setChatLoading(false);
+      }
+    }, 25);
+  };
+
   const handleSendMessage = async (customText) => {
     const textToSend = customText || inputMessage;
     if (!textToSend.trim() || chatLoading) return;
 
+    const userMsgId = 'user-' + Date.now();
     const userMsg = {
+      id: userMsgId,
       sender: 'user',
       text: textToSend,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -90,10 +187,13 @@ export const AIAssistant = () => {
     setChatLoading(true);
 
     try {
-      const history = messages.slice(-6).map(m => ({
-        role: m.sender === 'user' ? 'user' : 'model',
-        content: m.text
-      }));
+      const history = messages
+        .filter(m => !m.isStreaming)
+        .slice(-6)
+        .map(m => ({
+          role: m.sender === 'user' ? 'user' : 'model',
+          content: m.text
+        }));
 
       const res = await api.post('/ai/chat', { 
         message: textToSend,
@@ -101,26 +201,19 @@ export const AIAssistant = () => {
       });
 
       if (res.data?.success) {
-        setMessages(prev => [
-          ...prev,
-          {
-            sender: 'ai',
-            text: res.data.reply,
-            mode: res.data.mode,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }
-        ]);
+        typeMessageStreaming(res.data.reply, res.data.model || res.data.mode);
       }
     } catch (err) {
       setMessages(prev => [
         ...prev,
         {
+          id: 'err-' + Date.now(),
           sender: 'ai',
-          text: err.response?.data?.message || '⚠️ Unable to connect to assistant service. Please check network.',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          text: err.response?.data?.message || '⚠️ Unable to connect to Gemini Assistant. Please check your network or API key in Settings.',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          mode: 'System'
         }
       ]);
-    } finally {
       setChatLoading(false);
     }
   };
@@ -140,7 +233,7 @@ export const AIAssistant = () => {
       if (res.data?.success) {
         setClassifyResult(res.data.data);
       }
-    } catch (err) {
+    } catch {
       alert('Classification failed');
     } finally {
       setClassifyLoading(false);
@@ -157,46 +250,182 @@ export const AIAssistant = () => {
         tenantName: composerTenant,
         roomNumber: composerRoom,
         amount: composerAmount,
-        month: composerMonth
+        month: composerMonth,
+        dueDate: composerDueDate
       });
       if (res.data?.success) {
         setComposerResult(res.data.data);
       }
-    } catch (err) {
+    } catch {
       alert('Composer failed');
     } finally {
       setComposerLoading(false);
     }
   };
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (id) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } else {
+      setCopiedLetter(true);
+      setTimeout(() => setCopiedLetter(false), 2000);
+    }
   };
+
+  const clearChat = () => {
+    if (window.confirm('Clear conversation history?')) {
+      setMessages([
+        {
+          id: 'reset-msg',
+          sender: 'ai',
+          text: `Chat cleared! How can I help you today? Ask me about today's mess menu, room availability, pending rent, or anything else! ✨`,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          mode: 'Gemini AI'
+        }
+      ]);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Top Header & API Key Modal Trigger */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 animate-spin" /> Module 12 • Google Gemini AI Hub
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-xs font-semibold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 animate-spin text-cyan-400" /> Module 12 • Gemini AI 2.0 Hub
             </span>
+
+            {aiStatus.liveMode ? (
+              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                Live Gemini 1.5 Flash Connected
+              </span>
+            ) : (
+              <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                Database Engine (Add API Key for Live AI)
+              </span>
+            )}
           </div>
+
           <h2 className="text-2xl md:text-3xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2.5">
-            <Bot className="w-7 h-7 text-cyan-400" />
+            <Bot className="w-7 h-7 text-cyan-400 shrink-0" />
             AI Intelligence & Resident Assistant
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            24/7 resident AI companion, nearest hospital lookups, WiFi setup guides, smart complaint triage, and rent notice drafter.
+            Real-time conversational AI companion powered by Google Gemini with live hostel database knowledge.
           </p>
+        </div>
+
+        {/* API Key Configure Button */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowKeyModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-bold border border-slate-800 flex items-center gap-2 transition-all shadow-sm"
+          >
+            <Key className="w-4 h-4 text-cyan-400" />
+            <span>Gemini API Key</span>
+            {customKeyInput ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" title="Custom Key Active" />
+            ) : null}
+          </button>
         </div>
       </div>
 
+      {/* GEMINI API KEY CONFIGURATION MODAL */}
+      {showKeyModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            <button
+              onClick={() => setShowKeyModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center border border-cyan-500/20">
+                <Key className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-100">Google Gemini API Key</h3>
+                <p className="text-xs text-slate-400">Unlock live real-time answers for all open topics</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveCustomKey} className="space-y-4 mt-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Your Gemini API Key (from Google AI Studio)
+                </label>
+                <input
+                  type="password"
+                  placeholder="AIzaSy..."
+                  value={customKeyInput}
+                  onChange={(e) => setCustomKeyInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-100 font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Stored securely in your local browser storage. Never shared with third parties.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-cyan-950/20 border border-cyan-500/30 text-xs text-cyan-300 flex items-start gap-2">
+                <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-cyan-400" />
+                <div>
+                  <span className="font-semibold block">Need a free API key?</span>
+                  Get one in 30 seconds at{' '}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline text-cyan-200 font-bold hover:text-white inline-flex items-center gap-1"
+                  >
+                    Google AI Studio <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+
+              {keySaveSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Gemini API Key verified & saved successfully!</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={testingKey}
+                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 text-white text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  {testingKey ? 'Saving...' : 'Save & Connect Gemini'}
+                </button>
+
+                {customKeyInput && (
+                  <button
+                    type="button"
+                    onClick={handleClearKey}
+                    className="px-3 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-semibold"
+                    title="Remove API Key"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Mode Selector Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto scrollbar-none shrink-0">
         {[
-          { key: 'chat', label: '💬 Resident 24/7 AI Chatbot', icon: MessageSquare },
+          { key: 'chat', label: '💬 Real-Time Gemini AI Chat', icon: MessageSquare },
           { key: 'classifier', label: '⚡ Smart Complaint Auto-Classifier', icon: Zap },
           ...(isAdmin ? [{ key: 'composer', label: '✍️ Smart Rent Notice Composer', icon: FileText }] : [])
         ].map((tab) => {
@@ -206,68 +435,95 @@ export const AIAssistant = () => {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
                 isActive
                   ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-600/20'
                   : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-4 h-4 shrink-0" />
               {tab.label}
             </button>
           );
         })}
       </div>
 
-      {/* TAB 1: 24/7 AI CHATBOT */}
+      {/* TAB 1: REAL-TIME AI CHATBOT */}
       {activeTab === 'chat' && (
-        <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl flex flex-col h-[670px]">
-          {/* Quick Prompts Bar */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-3 border-b border-slate-800 scrollbar-none">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
-              <Zap className="w-3 h-3 text-cyan-400" /> Quick Ask:
-            </span>
-            {[
-              { label: '🏥 Nearest Hospital & Pharmacy', prompt: "Give nearest hospital, doctor, and emergency medical help" },
-              { label: '📶 Connect Hostel WiFi Steps', prompt: "Give steps to connect hostel wifi on my phone/laptop" },
-              { label: '🍽️ Today’s 4-Meal Menu', prompt: "What is for dinner and snacks today?" },
-              { label: '🚪 Gate Curfew Timings', prompt: "What are the hostel gate lockdown timings?" },
-              { label: '📦 Courier & Parcel Policy', prompt: "How do parcel and courier deliveries work here?" },
-              { label: '🏋️ Gym & 24/7 Study Room', prompt: "Where is the study room and what are the gym timings?" },
-              { label: '💳 Check My Rent Dues', prompt: "Do I have any pending rent invoices?" },
-              { label: '📞 Emergency Contacts', prompt: "Who is the warden and electrician contact?" }
-            ].map((qp, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSendMessage(qp.prompt)}
-                className="px-3 py-1 rounded-full bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-medium border border-slate-800 whitespace-nowrap transition-colors flex items-center gap-1"
-              >
-                {qp.label}
-              </button>
-            ))}
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl flex flex-col h-[580px] sm:h-[650px] md:h-[680px]">
+          {/* Quick Prompts Bar & Controls */}
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800 shrink-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1 flex-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
+                <Zap className="w-3 h-3 text-cyan-400" /> Quick Ask:
+              </span>
+              {[
+                { label: '🍽️ Today’s Food Menu', prompt: "What is for breakfast, lunch, snacks, and dinner today?" },
+                { label: '🏥 Nearest Hospital & Doctor', prompt: "Where is the nearest hospital, pharmacy, and medical help?" },
+                { label: '📶 Connect Hostel WiFi Steps', prompt: "How do I connect to the hostel high-speed WiFi?" },
+                { label: '🚪 Gate Curfew & Timings', prompt: "What are the hostel gate opening, closing, and curfew timings?" },
+                { label: '💳 Check My Rent Dues', prompt: "Do I have any pending rent invoices or unpaid dues?" },
+                { label: '🔧 My Complaint Status', prompt: "What is the status of my maintenance tickets?" },
+                { label: '🏋️ Study Room & Gym Timings', prompt: "What are the timings for the gym and 24/7 study room?" },
+                { label: '📦 Courier Delivery Policy', prompt: "How do parcel and Amazon courier deliveries work here?" },
+                { label: '📚 Best Study Schedule Tips', prompt: "Give me an effective 4-hour daily study routine for engineering/college exams." },
+                { label: '🍝 Quick 10-Min Dorm Recipes', prompt: "What are 3 quick and healthy snacks I can make in a PG hostel room?" }
+              ].map((qp, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSendMessage(qp.prompt)}
+                  className="px-3 py-1 rounded-full bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-medium border border-slate-800 whitespace-nowrap transition-colors flex items-center gap-1 shrink-0"
+                >
+                  {qp.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={clearChat}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+              title="Clear Conversation"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Chat Messages Feed */}
           <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 scrollbar-none">
-            {messages.map((msg, index) => {
+            {messages.map((msg) => {
               const isAi = msg.sender === 'ai';
               return (
-                <div key={index} className={`flex items-start gap-3 ${isAi ? '' : 'flex-row-reverse'}`}>
+                <div key={msg.id} className={`flex items-start gap-3 group ${isAi ? '' : 'flex-row-reverse'}`}>
                   <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
                     isAi ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 'bg-indigo-600 text-white'
                   }`}>
                     {isAi ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
                   </div>
 
-                  <div className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed shadow-sm ${
+                  <div className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed shadow-sm relative ${
                     isAi
                       ? 'bg-slate-950 border border-slate-800 text-slate-200'
                       : 'bg-indigo-600 text-white font-medium rounded-tr-none'
                   }`}>
-                    <div className="whitespace-pre-line">{msg.text}</div>
-                    <span className={`block text-[9px] mt-2 ${isAi ? 'text-slate-500' : 'text-indigo-200'}`}>
-                      {msg.time} {msg.mode && `• Powered by ${msg.mode}`}
-                    </span>
+                    <div className="whitespace-pre-line prose-invert select-text">
+                      {msg.text || (msg.isStreaming ? '...' : '')}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 mt-2 pt-1 border-t border-slate-800/40">
+                      <span className={`text-[9px] ${isAi ? 'text-slate-500' : 'text-indigo-200'}`}>
+                        {msg.time} {msg.mode && `• ${msg.mode}`}
+                      </span>
+
+                      {isAi && (
+                        <button
+                          onClick={() => copyToClipboard(msg.text, msg.id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-slate-400 hover:text-cyan-300 flex items-center gap-1"
+                        >
+                          {copiedId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          {copiedId === msg.id ? 'Copied' : 'Copy'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -276,17 +532,16 @@ export const AIAssistant = () => {
             {chatLoading && (
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 animate-spin" />
+                  <Bot className="w-4 h-4 animate-spin text-cyan-400" />
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce"></span>
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce [animation-delay:0.2s]"></span>
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce [animation-delay:0.4s]"></span>
-                  <span>Gemini is generating response...</span>
+                  <span>Gemini is generating response in real-time...</span>
                 </div>
               </div>
             )}
-            <div ref={chatBottomRef} />
           </div>
 
           {/* Input Box */}
@@ -295,19 +550,20 @@ export const AIAssistant = () => {
               e.preventDefault();
               handleSendMessage();
             }}
-            className="pt-3 border-t border-slate-800 flex items-center gap-2"
+            className="pt-3 border-t border-slate-800 flex items-center gap-2 shrink-0"
           >
             <input
               type="text"
-              placeholder="Ask anything: nearest hospital, wifi connection steps, gate timings, dinner menu, rent..."
+              placeholder="Ask anything: food menu, wifi steps, hospital, rent dues, exam tips, coding..."
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              disabled={chatLoading}
+              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors disabled:opacity-60"
             />
             <button
               type="submit"
               disabled={chatLoading || !inputMessage.trim()}
-              className="p-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 text-white transition-all disabled:opacity-40"
+              className="p-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 text-white transition-all disabled:opacity-40 shrink-0"
             >
               <Send className="w-4 h-4" />
             </button>
@@ -420,7 +676,7 @@ export const AIAssistant = () => {
 
             {classifyResult && (
               <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Model: Gemini 1.5 Flash</span>
+                <span>Engine: Gemini 1.5 Flash</span>
                 <span className="text-emerald-400 font-semibold">Confidence: {classifyResult.confidenceScore}</span>
               </div>
             )}
@@ -491,13 +747,23 @@ export const AIAssistant = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Due Date</label>
+                <input
+                  type="date"
+                  value={composerDueDate}
+                  onChange={(e) => setComposerDueDate(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
               <button
                 type="submit"
                 disabled={composerLoading}
                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all"
               >
                 <Sparkles className="w-4 h-4" />
-                {composerLoading ? 'Drafting with Gemini...' : 'Generate Personalized Notice'}
+                {composerLoading ? 'Drafting with Gemini AI...' : 'Generate Personalized Notice'}
               </button>
             </form>
           </div>
@@ -516,8 +782,8 @@ export const AIAssistant = () => {
                     onClick={() => copyToClipboard(composerResult.message)}
                     className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors"
                   >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copied ? 'Copied!' : 'Copy Letter'}
+                    {copiedLetter ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedLetter ? 'Copied!' : 'Copy Letter'}
                   </button>
                 )}
               </div>
@@ -530,7 +796,7 @@ export const AIAssistant = () => {
 
                   <div className="p-3 rounded-xl bg-indigo-950/20 border border-indigo-500/30">
                     <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block mb-1">
-                      📱 One-Line WhatsApp / SMS Text:
+                      📱 WhatsApp / SMS Text:
                     </span>
                     <p className="text-xs text-slate-300">{composerResult.smsText}</p>
                   </div>
