@@ -69,7 +69,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-gemini-api-key']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(morgan(config.nodeEnv === 'production' ? 'combined' : 'dev'));

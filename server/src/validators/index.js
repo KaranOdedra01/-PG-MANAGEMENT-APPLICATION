@@ -213,7 +213,7 @@ export const updateMealPlanSchema = z.object({
 
 // AI
 export const aiChatSchema = z.object({
-  message: z.string().min(1, 'Message is required').trim(),
+  message: z.string().trim().min(1, 'Message is required'),
   conversationHistory: z.array(z.object({
     role: z.string(),
     content: z.string().optional(),
@@ -224,7 +224,7 @@ export const aiChatSchema = z.object({
 
 export const aiClassifyComplaintSchema = z.object({
   title: z.string().optional().default(''),
-  description: z.string().min(3, 'Description is required').trim()
+  description: z.string().trim().min(3, 'Description is required')
 });
 
 export const aiComposeReminderSchema = z.object({
