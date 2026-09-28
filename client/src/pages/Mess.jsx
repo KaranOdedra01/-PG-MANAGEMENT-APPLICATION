@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
@@ -19,10 +19,71 @@ import {
   X, 
   Check, 
   Flame,
-  ChefHat
+  ChefHat,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+const MEAL_CONFIG = [
+  {
+    id: 'breakfast',
+    title: 'Breakfast',
+    icon: Sunrise,
+    color: 'amber',
+    borderColor: 'hover:border-amber-500/30',
+    iconBg: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    timeLabel: '7:30 – 10:00 AM',
+    startHour: 7,
+    startMinute: 30,
+    endHour: 10,
+    endMinute: 0,
+    field: 'breakfast'
+  },
+  {
+    id: 'lunch',
+    title: 'Lunch',
+    icon: Sun,
+    color: 'emerald',
+    borderColor: 'hover:border-emerald-500/30',
+    iconBg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    timeLabel: '12:30 – 2:30 PM',
+    startHour: 12,
+    startMinute: 30,
+    endHour: 14,
+    endMinute: 30,
+    field: 'lunch'
+  },
+  {
+    id: 'snacks',
+    title: 'Evening Snacks',
+    icon: Coffee,
+    color: 'violet',
+    borderColor: 'hover:border-violet-500/30',
+    iconBg: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
+    timeLabel: '5:00 – 6:30 PM',
+    startHour: 17,
+    startMinute: 0,
+    endHour: 18,
+    endMinute: 30,
+    field: 'snacks'
+  },
+  {
+    id: 'dinner',
+    title: 'Dinner',
+    icon: Moon,
+    color: 'indigo',
+    borderColor: 'hover:border-indigo-500/30',
+    iconBg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    timeLabel: '8:00 – 10:00 PM',
+    startHour: 20,
+    startMinute: 0,
+    endHour: 22,
+    endMinute: 0,
+    field: 'dinner'
+  }
+];
 
 export const Mess = () => {
   const { user } = useAuth();
@@ -34,6 +95,25 @@ export const Mess = () => {
   const [mySubscription, setMySubscription] = useState(null);
   const [selectedDay, setSelectedDay] = useState('Monday');
   const [loading, setLoading] = useState(true);
+  const [showFinishedMeals, setShowFinishedMeals] = useState(false);
+
+  const currentDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const isSelectedDayToday = selectedDay.toLowerCase() === currentDayName.toLowerCase();
+
+  const isMealFinished = (meal) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const endMinutes = meal.endHour * 60 + meal.endMinute;
+    return currentMinutes >= endMinutes;
+  };
+
+  const isMealOngoing = (meal) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const startMinutes = meal.startHour * 60 + meal.startMinute;
+    const endMinutes = meal.endHour * 60 + meal.endMinute;
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  };
 
   // Edit Menu Modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -218,24 +298,31 @@ export const Mess = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {['breakfast', 'lunch', 'dinner'].map((mKey) => {
               const isAttending = mySubscription.todayAttendance?.[mKey];
+              const mealConfig = MEAL_CONFIG.find(m => m.id === mKey);
+              const isPassed = mealConfig ? isMealFinished(mealConfig) : false;
+
               return (
-                <div key={mKey} className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <div key={mKey} className={`p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between ${isPassed ? 'opacity-60' : ''}`}>
                   <span className="text-xs font-bold text-slate-200 capitalize flex items-center gap-1.5">
                     {mKey === 'breakfast' && <Sunrise className="w-4 h-4 text-amber-400" />}
                     {mKey === 'lunch' && <Sun className="w-4 h-4 text-emerald-400" />}
                     {mKey === 'dinner' && <Moon className="w-4 h-4 text-indigo-400" />}
                     {mKey}
+                    {isPassed && <span className="text-[10px] text-slate-500 font-medium">(Ended)</span>}
                   </span>
 
                   <button
+                    disabled={isPassed}
                     onClick={() => handleToggleAttendance(mKey)}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      isAttending
+                      isPassed
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : isAttending
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
                         : 'bg-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {isAttending ? 'Attending' : 'Skipping'}
+                    {isPassed ? 'Ended' : isAttending ? 'Attending' : 'Skipping'}
                   </button>
                 </div>
               );
@@ -256,95 +343,135 @@ export const Mess = () => {
                 : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
             }`}
           >
-            {d}
+            {d} {d.toLowerCase() === currentDayName.toLowerCase() && '• Today'}
           </button>
         ))}
       </div>
 
       {/* 4 Meals Card Grid for Selected Day */}
-      {activeDayMenu && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-slate-100">{activeDayMenu.day}'s Timetable</h3>
-              {activeDayMenu.specialNote && (
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-300 border border-violet-500/20 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-violet-400" />
-                  {activeDayMenu.specialNote}
-                </span>
-              )}
+      {activeDayMenu && (() => {
+        const displayedMeals = isSelectedDayToday && !showFinishedMeals
+          ? MEAL_CONFIG.filter(meal => !isMealFinished(meal))
+          : MEAL_CONFIG;
+
+        const finishedCountToday = isSelectedDayToday 
+          ? MEAL_CONFIG.filter(meal => isMealFinished(meal)).length 
+          : 0;
+
+        return (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-100">{activeDayMenu.day}'s Timetable</h3>
+                {isSelectedDayToday && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    Live Today
+                  </span>
+                )}
+                {activeDayMenu.specialNote && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-300 border border-violet-500/20 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-violet-400" />
+                    {activeDayMenu.specialNote}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isSelectedDayToday && finishedCountToday > 0 && (
+                  <button
+                    onClick={() => setShowFinishedMeals(!showFinishedMeals)}
+                    className="text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-colors"
+                    title="Toggle past completed meals"
+                  >
+                    {showFinishedMeals ? <EyeOff className="w-3.5 h-3.5 text-indigo-400" /> : <Eye className="w-3.5 h-3.5 text-indigo-400" />}
+                    <span>{showFinishedMeals ? 'Hide Finished Meals' : `${finishedCountToday} Ended Meal${finishedCountToday > 1 ? 's' : ''} Hidden`}</span>
+                  </button>
+                )}
+
+                {isAdmin && (
+                  <button
+                    onClick={() => openEditModal(activeDayMenu)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
+                    Customize Menu
+                  </button>
+                )}
+              </div>
             </div>
 
-            {isAdmin && (
-              <button
-                onClick={() => openEditModal(activeDayMenu)}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors"
-              >
-                <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
-                Customize Menu
-              </button>
+            {displayedMeals.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-slate-900/80 border border-slate-800 text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <h4 className="text-base font-bold text-slate-100">All Today's Meals Have Ended</h4>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Breakfast, Lunch, Evening Snacks & Dinner services for today have completed.
+                </p>
+                <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    onClick={() => {
+                      const tomorrowIndex = (DAYS.indexOf(currentDayName) + 1) % DAYS.length;
+                      setSelectedDay(DAYS[tomorrowIndex]);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md"
+                  >
+                    View Tomorrow's ({DAYS[(DAYS.indexOf(currentDayName) + 1) % DAYS.length]}) Menu →
+                  </button>
+                  <button
+                    onClick={() => setShowFinishedMeals(true)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors"
+                  >
+                    Show Completed Meals
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {displayedMeals.map((meal) => {
+                  const MealIcon = meal.icon;
+                  const isPast = isSelectedDayToday && isMealFinished(meal);
+                  const isServing = isSelectedDayToday && isMealOngoing(meal);
+                  const menuText = activeDayMenu[meal.field] || 'Special chef selection';
+
+                  return (
+                    <div
+                      key={meal.id}
+                      className={`p-5 rounded-2xl bg-slate-900/80 border border-slate-800 ${meal.borderColor} transition-all space-y-3 shadow-md ${
+                        isPast ? 'opacity-50 grayscale-[40%]' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className={`p-2.5 rounded-xl border ${meal.iconBg}`}>
+                          <MealIcon className="w-5 h-5" />
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-semibold block">{meal.timeLabel}</span>
+                          {isServing && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20 mt-0.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Serving Now
+                            </span>
+                          )}
+                          {isPast && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-800/80 px-1.5 py-0.5 rounded-full mt-0.5 inline-block">
+                              Ended
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{meal.title}</h4>
+                        <p className="text-xs text-slate-300 mt-2 leading-relaxed whitespace-pre-line">{menuText}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Breakfast Card */}
-            <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-amber-500/30 transition-all space-y-3 shadow-md">
-              <div className="flex items-center justify-between">
-                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                  <Sunrise className="w-5 h-5" />
-                </div>
-                <span className="text-[10px] text-slate-500 font-semibold">7:30 – 9:30 AM</span>
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Breakfast</h4>
-                <p className="text-xs text-slate-300 mt-2 leading-relaxed whitespace-pre-line">{activeDayMenu.breakfast}</p>
-              </div>
-            </div>
-
-            {/* Lunch Card */}
-            <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-emerald-500/30 transition-all space-y-3 shadow-md">
-              <div className="flex items-center justify-between">
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <Sun className="w-5 h-5" />
-                </div>
-                <span className="text-[10px] text-slate-500 font-semibold">12:30 – 2:30 PM</span>
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Lunch</h4>
-                <p className="text-xs text-slate-300 mt-2 leading-relaxed whitespace-pre-line">{activeDayMenu.lunch}</p>
-              </div>
-            </div>
-
-            {/* High Tea Card */}
-            <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-violet-500/30 transition-all space-y-3 shadow-md">
-              <div className="flex items-center justify-between">
-                <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/20">
-                  <Coffee className="w-5 h-5" />
-                </div>
-                <span className="text-[10px] text-slate-500 font-semibold">5:00 – 6:30 PM</span>
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Evening Snacks</h4>
-                <p className="text-xs text-slate-300 mt-2 leading-relaxed whitespace-pre-line">{activeDayMenu.snacks}</p>
-              </div>
-            </div>
-
-            {/* Dinner Card */}
-            <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-indigo-500/30 transition-all space-y-3 shadow-md">
-              <div className="flex items-center justify-between">
-                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  <Moon className="w-5 h-5" />
-                </div>
-                <span className="text-[10px] text-slate-500 font-semibold">8:00 – 10:00 PM</span>
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Dinner</h4>
-                <p className="text-xs text-slate-300 mt-2 leading-relaxed whitespace-pre-line">{activeDayMenu.dinner}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* EDIT MENU MODAL (Admin) */}
       {isEditModalOpen && (

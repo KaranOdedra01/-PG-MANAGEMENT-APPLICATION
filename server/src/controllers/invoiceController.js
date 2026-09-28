@@ -17,6 +17,20 @@ export const getInvoices = async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
 
+    // Auto-flag overdue invoices: any pending invoice past due date becomes overdue
+    if (role !== 'tenant') {
+      await Invoice.updateMany(
+        { status: 'pending', dueDate: { $lt: new Date() } },
+        { $set: { status: 'overdue' } }
+      );
+    } else {
+      // For tenant, only flag their own
+      await Invoice.updateMany(
+        { tenantId: req.user._id, status: 'pending', dueDate: { $lt: new Date() } },
+        { $set: { status: 'overdue' } }
+      );
+    }
+
     const query = {};
 
     // IDOR Protection: Tenants can ONLY see their own invoices
@@ -61,6 +75,7 @@ export const getInvoices = async (req, res) => {
     return handleControllerError(res, error, 'Failed to fetch invoices');
   }
 };
+
 
 // @desc    Get Single Invoice by ID
 // @route   GET /api/invoices/:id

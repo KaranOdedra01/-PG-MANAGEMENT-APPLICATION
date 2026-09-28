@@ -135,13 +135,23 @@ export const Complaints = () => {
     setModalError('');
     setSubmitting(true);
     try {
-      await api.post('/complaints', formData);
+      const payload = isTenant ? { ...formData, priority: undefined } : formData;
+      await api.post('/complaints', payload);
       setIsRaiseOpen(false);
       fetchComplaints();
     } catch (err) {
       setModalError(err.response?.data?.message || err.message || 'Failed to raise complaint');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handlePriorityChange = async (ticketId, newPriority) => {
+    try {
+      await api.patch(`/complaints/${ticketId}/priority`, { priority: newPriority });
+      fetchComplaints();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update priority');
     }
   };
 
@@ -358,12 +368,34 @@ export const Complaints = () => {
                         <span className="text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
                           Room #{ticket.roomNumber}
                         </span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border flex items-center gap-1 ${
-                          isUrgent ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}>
-                          {isUrgent && <Flame className="w-3 h-3 text-rose-400 animate-pulse" />}
-                          {ticket.priority} Priority
-                        </span>
+                        {(isAdmin || isStaff) ? (
+                          <div className="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-full border border-slate-700">
+                            <span className="text-[10px] text-slate-400 font-semibold uppercase">Priority:</span>
+                            <select
+                              value={ticket.priority || 'medium'}
+                              onChange={(e) => handlePriorityChange(ticket._id, e.target.value)}
+                              className={`text-[10px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-transparent focus:outline-none cursor-pointer ${
+                                ticket.priority === 'urgent' ? 'text-rose-400' :
+                                ticket.priority === 'high' ? 'text-amber-400' :
+                                ticket.priority === 'low' ? 'text-blue-400' :
+                                'text-emerald-400'
+                              }`}
+                              title="Set by Admin: Change priority"
+                            >
+                              <option value="low" className="bg-slate-900 text-slate-200">Low</option>
+                              <option value="medium" className="bg-slate-900 text-slate-200">Medium</option>
+                              <option value="high" className="bg-slate-900 text-slate-200">High</option>
+                              <option value="urgent" className="bg-slate-900 text-slate-200">Urgent</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                            isUrgent ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}>
+                            {isUrgent && <Flame className="w-3 h-3 text-rose-400 animate-pulse" />}
+                            {ticket.priority} Priority
+                          </span>
+                        )}
                       </div>
 
                       <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">{ticket.description}</p>
@@ -526,19 +558,27 @@ export const Complaints = () => {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Priority Level *</label>
-                  <select
-                    value={formData.priority}
-                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-rose-500"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                </div>
+                {!isTenant ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Priority Level *</label>
+                    <select
+                      value={formData.priority}
+                      onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-rose-500"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="flex flex-col justify-end">
+                    <span className="text-[11px] text-slate-400 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 leading-tight">
+                      🛡️ <strong>Admin-Assessed:</strong> Priority is determined and set by PG Admin upon ticket review.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>

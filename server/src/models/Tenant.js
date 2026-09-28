@@ -87,6 +87,29 @@ const tenantSchema = new mongoose.Schema({
   deletedAt: {
     type: Date,
     default: null
+  },
+  depositStatus: {
+    type: String,
+    enum: ['held', 'refunded', 'forfeited'],
+    default: 'held',
+    index: true
+  },
+  depositRefundedAt: {
+    type: Date,
+    default: null
+  },
+  noticeStartDate: {
+    type: Date,
+    default: null
+  },
+  expectedCheckOutDate: {
+    type: Date,
+    default: null
+  },
+  noticeReason: {
+    type: String,
+    default: '',
+    trim: true
   }
 }, { timestamps: true });
 

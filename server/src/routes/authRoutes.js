@@ -1,5 +1,5 @@
 import express from 'express';
-import { register, login, getMe, getDemoAccounts, createPrivilegedUser, changePassword, getStaffList } from '../controllers/authController.js';
+import { register, login, getMe, getDemoAccounts, createPrivilegedUser, changePassword, getStaffList, updateProfile } from '../controllers/authController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import { validate } from '../middleware/validate.js';
 import { registerSchema, loginSchema, createUserSchema, changePasswordSchema } from '../validators/index.js';
@@ -13,5 +13,6 @@ router.post('/users', protect, authorize('admin'), validate(createUserSchema), c
 router.get('/staff', protect, authorize('admin', 'staff'), getStaffList);
 router.get('/me', protect, getMe);
 router.get('/demo-accounts', getDemoAccounts);
+router.patch('/profile', protect, updateProfile);
 
 export default router;

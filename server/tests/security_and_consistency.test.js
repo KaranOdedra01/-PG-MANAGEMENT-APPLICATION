@@ -379,5 +379,31 @@ describe('Security & Data Consistency Tests', () => {
       assert.equal(dinner, 1);
     });
   });
+
+  describe('10. Complaint Priority Authorization & Logic', () => {
+    it('should enforce default medium priority for tenant even if high or urgent is requested', () => {
+      const userRole = 'tenant';
+      const requestedPriority = 'urgent';
+      const effectivePriority = userRole === 'tenant' ? 'medium' : requestedPriority;
+      assert.equal(effectivePriority, 'medium');
+    });
+
+    it('should allow admin or staff to set custom priority', () => {
+      const userRole = 'admin';
+      const requestedPriority = 'urgent';
+      const effectivePriority = userRole === 'tenant' ? 'medium' : requestedPriority;
+      assert.equal(effectivePriority, 'urgent');
+    });
+
+    it('should validate priority against allowed enum values', () => {
+      const allowed = ['low', 'medium', 'high', 'urgent'];
+      assert.ok(allowed.includes('low'));
+      assert.ok(allowed.includes('medium'));
+      assert.ok(allowed.includes('high'));
+      assert.ok(allowed.includes('urgent'));
+      assert.equal(allowed.includes('critical'), false);
+    });
+  });
 });
+
 

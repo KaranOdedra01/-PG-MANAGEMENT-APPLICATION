@@ -274,3 +274,61 @@ export const getStaffList = async (req, res) => {
     return handleControllerError(res, error, 'fetching staff list');
   }
 };
+
+// @desc    Update current user profile (name, phone, emergencyContact)
+// @route   PATCH /api/auth/profile
+// @access  Private (All roles)
+export const updateProfile = async (req, res) => {
+  try {
+    if (!req.user || !isValidObjectId(req.user._id)) {
+      return res.status(401).json({ success: false, message: 'Not authorized' });
+    }
+
+    const { name, phone, emergencyContact } = req.body;
+
+    if (name !== undefined && (!name || name.trim().length < 2)) {
+      return res.status(400).json({ success: false, message: 'Name must be at least 2 characters' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (name) user.name = name.trim();
+    if (phone !== undefined) user.phone = phone.trim();
+    if (emergencyContact) {
+      user.emergencyContact = {
+        name: (emergencyContact.name || '').trim(),
+        phone: (emergencyContact.phone || '').trim(),
+        relation: (emergencyContact.relation || '').trim()
+      };
+    }
+
+    await user.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_PROFILE',
+      entity: 'User',
+      entityId: user._id,
+      description: `User ${user.name} updated their profile`
+    });
+
+    return res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        avatar: user.avatar,
+        emergencyContact: user.emergencyContact
+      }
+    });
+  } catch (error) {
+    return handleControllerError(res, error, 'updating profile');
+  }
+};

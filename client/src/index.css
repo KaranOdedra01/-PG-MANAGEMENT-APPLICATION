@@ -4,7 +4,7 @@
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans antialiased selection:bg-indigo-500 selection:text-white min-h-screen;
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans antialiased selection:bg-indigo-500 selection:text-white min-h-screen transition-colors duration-200;
   }
 }
 
@@ -18,4 +18,119 @@
   background: rgba(30, 41, 59, 0.85);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(51, 65, 85, 0.8);
+}
+
+/* ========================================================
+   LIGHT MODE ADAPTIVE UTILITIES
+   Automatically applies modern high-contrast light theme
+   when html does NOT have the 'dark' class.
+   ======================================================== */
+
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+/* Main background & root layout */
+html:not(.dark) .bg-slate-950,
+html:not(.dark) .bg-slate-950\/80,
+html:not(.dark) .bg-slate-950\/60,
+html:not(.dark) .bg-slate-950\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+/* Primary surface & cards */
+html:not(.dark) .bg-slate-900,
+html:not(.dark) .bg-slate-900\/90,
+html:not(.dark) .bg-slate-900\/80,
+html:not(.dark) .bg-slate-900\/70 {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+/* Secondary surface & elevated components */
+html:not(.dark) .bg-slate-800 {
+  background-color: #f8fafc !important;
+}
+
+html:not(.dark) .bg-slate-800\/80,
+html:not(.dark) .bg-slate-800\/60,
+html:not(.dark) .bg-slate-800\/50,
+html:not(.dark) .bg-slate-800\/40,
+html:not(.dark) .bg-slate-800\/30 {
+  background-color: #f1f5f9 !important;
+}
+
+html:not(.dark) .hover\:bg-slate-800:hover,
+html:not(.dark) .hover\:bg-slate-700:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* Borders */
+html:not(.dark) .border-slate-800,
+html:not(.dark) .border-slate-800\/80,
+html:not(.dark) .border-slate-800\/60,
+html:not(.dark) .border-slate-700,
+html:not(.dark) .border-slate-700\/80 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Text Hierarchy */
+html:not(.dark) .text-slate-100,
+html:not(.dark) .text-slate-200 {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .text-slate-300 {
+  color: #334155 !important;
+}
+
+html:not(.dark) .text-slate-400 {
+  color: #64748b !important;
+}
+
+html:not(.dark) .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Inputs, Selects & Textareas */
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]),
+html:not(.dark) select,
+html:not(.dark) textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html:not(.dark) input::placeholder,
+html:not(.dark) textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Header & Navbar */
+html:not(.dark) header {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Sidebar */
+html:not(.dark) aside {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Modals backdrop */
+html:not(.dark) .fixed.inset-0.bg-slate-950\/80,
+html:not(.dark) .fixed.inset-0.bg-black\/60 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+/* Gradient Hero / Welcome Banners */
+html:not(.dark) .from-indigo-950\/70,
+html:not(.dark) .from-indigo-950\/40 {
+  background: linear-gradient(to right, #eff6ff, #f8fafc, #ffffff) !important;
+  border-color: #c7d2fe !important;
 }

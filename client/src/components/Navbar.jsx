@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, User, Bell, Check, CheckCheck, Menu, Building2 } from 'lucide-react';
+import { LogOut, User, Bell, Check, CheckCheck, Menu, Building2, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import api from '../api/axios';
 
 export const Navbar = ({ onToggleSidebar }) => {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme, isDark } = useTheme();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -76,6 +78,20 @@ export const Navbar = ({ onToggleSidebar }) => {
       <div className="flex items-center gap-4">
         {user && (
           <div className="flex items-center gap-3 relative">
+            {/* Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-slate-400 hover:text-amber-400 dark:hover:text-amber-300 hover:bg-slate-800/60 rounded-xl transition-all"
+              title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle theme mode"
+            >
+              {isDark ? (
+                <Sun className="w-4 h-4 text-amber-400 transition-transform hover:rotate-45" />
+              ) : (
+                <Moon className="w-4 h-4 text-indigo-600 transition-transform hover:-rotate-12" />
+              )}
+            </button>
+
             {/* Notification Bell */}
             <div className="relative">
               <button

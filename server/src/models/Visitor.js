@@ -54,13 +54,17 @@ const visitorSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['inside', 'checked-out'], 
+    enum: ['inside', 'checked-out', 'expected'], 
     default: 'inside',
     index: true 
   },
   isLateNight: { 
     type: Boolean, 
     default: false 
+  },
+  expectedArrivalDate: {
+    type: Date,
+    default: null
   },
   loggedBy: { 
     type: String, 

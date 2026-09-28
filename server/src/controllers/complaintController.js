@@ -120,6 +120,9 @@ export const createComplaint = async (req, res) => {
       assignedRoom = tenant?.roomNumber || req.user.roomNumber || 'General';
     }
 
+    // Priority policy: Tenants cannot set complaint priority. It defaults to 'medium' and is set by Admin.
+    const effectivePriority = req.user.role === 'tenant' ? 'medium' : (priority?.toLowerCase() || 'medium');
+
     const complaint = await Complaint.create({
       tenantId: req.user._id,
       tenantName: req.user.name,
@@ -127,7 +130,7 @@ export const createComplaint = async (req, res) => {
       title: title.trim(),
       description: description.trim(),
       category: category.toLowerCase(),
-      priority: priority.toLowerCase(),
+      priority: effectivePriority,
       status: 'open',
       attachments,
       assignedStaffId: null
@@ -182,6 +185,9 @@ export const updateComplaintStatus = async (req, res) => {
     complaint.status = status;
     if (resolutionNote) complaint.resolutionNote = resolutionNote.trim();
     if (actualCost !== undefined) complaint.actualCost = Number(actualCost);
+    if (req.body.priority && ['low', 'medium', 'high', 'urgent'].includes(req.body.priority.toLowerCase())) {
+      complaint.priority = req.body.priority.toLowerCase();
+    }
 
     if (status === 'resolved') {
       complaint.resolvedAt = new Date();
@@ -320,3 +326,177 @@ export const deleteComplaint = async (req, res) => {
     return handleControllerError(res, error, 'Failed to delete complaint');
   }
 };
+
+// @desc    Tenant Confirms Resolution
+// @route   PATCH /api/complaints/:id/confirm
+// @access  Private (Tenant only - must own the complaint)
+export const confirmComplaintResolution = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    const complaint = await Complaint.findById(id);
+    if (!complaint) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    if (complaint.tenantId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Access denied: You can only confirm your own complaints' });
+    }
+
+    if (complaint.status !== 'resolved') {
+      return res.status(400).json({ success: false, message: 'Only resolved complaints can be confirmed' });
+    }
+
+    complaint.tenantConfirmed = true;
+    complaint.status = 'closed';
+    complaint.closedAt = new Date();
+    await complaint.save();
+
+    // Notify assigned staff if any
+    if (complaint.assignedStaffId) {
+      await Notification.create({
+        recipient: complaint.assignedStaffId,
+        type: 'complaint',
+        title: 'Resolution Confirmed',
+        message: `Tenant confirmed resolution of complaint #${complaint.ticketNumber || complaint._id}.`,
+        link: '/complaints'
+      });
+    }
+
+    return res.json({ success: true, message: 'Resolution confirmed. Complaint closed.', data: complaint });
+  } catch (error) {
+    return handleControllerError(res, error, 'Failed to confirm resolution');
+  }
+};
+
+// @desc    Tenant Reopens a Resolved Complaint
+// @route   PATCH /api/complaints/:id/reopen
+// @access  Private (Tenant only - must own the complaint)
+export const reopenComplaint = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    const complaint = await Complaint.findById(id);
+    if (!complaint) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    if (complaint.tenantId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Access denied: You can only reopen your own complaints' });
+    }
+
+    if (!['resolved', 'closed'].includes(complaint.status)) {
+      return res.status(400).json({ success: false, message: 'Only resolved or closed complaints can be reopened' });
+    }
+
+    complaint.status = 'in-progress';
+    complaint.tenantConfirmed = false;
+    complaint.resolvedAt = null;
+    await complaint.save();
+
+    // Notify assigned staff if any
+    if (complaint.assignedStaffId) {
+      await Notification.create({
+        recipient: complaint.assignedStaffId,
+        type: 'complaint',
+        title: 'Complaint Reopened',
+        message: `Tenant reopened complaint #${complaint.ticketNumber || complaint._id}. Please review.`,
+        link: '/complaints'
+      });
+    }
+
+    return res.json({ success: true, message: 'Complaint reopened successfully', data: complaint });
+  } catch (error) {
+    return handleControllerError(res, error, 'Failed to reopen complaint');
+  }
+};
+
+// @desc    Get complaints assigned to the logged-in staff/admin (My Tasks)
+// @route   GET /api/complaints/my-tasks
+// @access  Private (Staff & Admin)
+export const getMyTasks = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { status } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const query = {
+      assignedStaffId: userId,
+      status: { $nin: ['resolved', 'closed'] }
+    };
+
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    const total = await Complaint.countDocuments(query);
+    const complaints = await Complaint.find(query)
+      .sort({ priority: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return res.json({
+      success: true,
+      data: complaints,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 }
+    });
+  } catch (error) {
+    return handleControllerError(res, error, 'Failed to fetch tasks');
+  }
+};
+
+// @desc    Update Complaint Priority (Admin & Staff Only)
+// @route   PATCH /api/complaints/:id/priority
+// @access  Private (Admin & Staff)
+export const updateComplaintPriority = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    const { priority } = req.body;
+    const allowed = ['low', 'medium', 'high', 'urgent'];
+    if (!priority || !allowed.includes(priority.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: `Priority must be one of: ${allowed.join(', ')}`
+      });
+    }
+
+    const complaint = await Complaint.findById(id);
+    if (!complaint) {
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
+    }
+
+    const prevPriority = complaint.priority;
+    complaint.priority = priority.toLowerCase();
+    await complaint.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'UPDATE_COMPLAINT_PRIORITY',
+      entity: 'Complaint',
+      entityId: complaint._id,
+      description: `Updated complaint #${complaint.ticketNumber || complaint._id} priority from ${prevPriority} to ${complaint.priority}`
+    });
+
+    return res.json({
+      success: true,
+      message: `Priority updated to ${complaint.priority}`,
+      data: complaint
+    });
+  } catch (error) {
+    return handleControllerError(res, error, 'Failed to update complaint priority');
+  }
+};
+
+

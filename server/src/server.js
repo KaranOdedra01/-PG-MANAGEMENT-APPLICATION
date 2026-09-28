@@ -21,6 +21,8 @@ import visitorRoutes from './routes/visitorRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import settingsRoutes from './routes/settingsRoutes.js';
+
 
 const app = express();
 
@@ -125,6 +127,8 @@ app.use('/api/visitors', visitorRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/settings', settingsRoutes);
+
 
 // Health Check Endpoint (Safe MongoDB Connection Verification)
 app.get('/api/health', (req, res) => {
