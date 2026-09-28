@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, User, Bell, Sparkles, Check, CheckCheck, Menu } from 'lucide-react';
+import { LogOut, User, Bell, Check, CheckCheck, Menu, Building2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 
@@ -68,8 +68,8 @@ export const Navbar = ({ onToggleSidebar }) => {
         </button>
 
         <div className="hidden sm:flex items-center gap-2 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-          <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-          Powered by Gemini AI
+          <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+          Greenwood PG Living
         </div>
       </div>
 

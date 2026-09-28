@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -16,7 +16,6 @@ import { Notices } from './pages/Notices';
 import { Mess } from './pages/Mess';
 import { Visitors } from './pages/Visitors';
 import { Reports } from './pages/Reports';
-import { AIAssistant } from './pages/AIAssistant';
 
 export function App() {
   return (
@@ -126,16 +125,6 @@ export function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <Reports />
-                </ProtectedRoute>
-              } 
-            />
-
-            {/* Module 12: Gemini AI Assistant */}
-            <Route 
-              path="ai-assistant" 
-              element={
-                <ProtectedRoute allowedRoles={['admin', 'tenant', 'staff']}>
-                  <AIAssistant />
                 </ProtectedRoute>
               } 
             />

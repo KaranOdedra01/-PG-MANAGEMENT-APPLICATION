@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
@@ -7,7 +7,6 @@ import {
   Receipt, 
   AlertCircle, 
   TrendingUp, 
-  Sparkles, 
   CheckCircle2, 
   Clock, 
   ArrowUpRight,
@@ -96,14 +95,6 @@ export const DashboardOverview = () => {
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-indigo-400' : ''}`} />
           </button>
-
-          <Link
-            to="/ai-assistant"
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-500/25 transition-all"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Gemini Assistant
-          </Link>
         </div>
       </div>
 
@@ -257,17 +248,6 @@ export const DashboardOverview = () => {
                   <span className="text-xs font-semibold text-slate-200">Post Notice</span>
                 </Link>
               </div>
-
-              {/* Gemini Quick Prompt suggestion */}
-              <div className="mt-4 p-3 rounded-xl bg-gradient-to-r from-violet-950/40 to-indigo-950/40 border border-indigo-500/20">
-                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300 mb-1">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                  Gemini Smart Recommendation
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  "You have 3 vacant beds in 2nd floor rooms. Gemini can auto-generate rent reminder messages or marketing flyers."
-                </p>
-              </div>
             </div>
 
             {/* Room Distribution Breakdown */}
@@ -386,13 +366,6 @@ export const DashboardOverview = () => {
               >
                 <Wrench className="w-3.5 h-3.5 text-amber-400" />
                 Raise Maintenance Ticket
-              </Link>
-              <Link
-                to="/ai-assistant"
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition-colors flex items-center gap-2"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Ask Room AI Assistant
               </Link>
             </div>
           </div>

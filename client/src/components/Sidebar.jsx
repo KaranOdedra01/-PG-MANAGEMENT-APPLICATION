@@ -12,7 +12,6 @@ import {
   UtensilsCrossed,
   ShieldCheck,
   FileText,
-  Bot,
   LogOut,
   Building2,
   X
@@ -33,7 +32,6 @@ export const Sidebar = ({ isOpen, onClose }) => {
     { to: '/mess', label: 'Mess & Food', icon: UtensilsCrossed, roles: ['admin', 'tenant', 'staff'] },
     { to: '/visitors', label: 'Visitor Logs', icon: ShieldCheck, roles: ['admin', 'staff'] },
     { to: '/reports', label: 'Reports & Analytics', icon: FileText, roles: ['admin'] },
-    { to: '/ai-assistant', label: 'Gemini AI Assistant', icon: Bot, roles: ['admin', 'tenant', 'staff'], badge: 'AI 2.0' },
   ];
 
   const filteredLinks = links.filter((l) => l.roles.includes(role));
