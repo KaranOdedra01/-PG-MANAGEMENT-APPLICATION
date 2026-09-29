@@ -1,10 +1,11 @@
 import http from 'http';
 import jwt from 'jsonwebtoken';
-import app from '../src/server.js';
 
 export const TEST_JWT_SECRET = 'unit_testing_secure_jwt_secret_key_32_characters_long_2026';
 process.env.JWT_SECRET = TEST_JWT_SECRET;
 process.env.NODE_ENV = 'test';
+
+const { default: app } = await import('../src/server.js');
 
 export const createTestToken = (id, role = 'tenant') => {
   return jwt.sign({ id, role }, TEST_JWT_SECRET, { expiresIn: '1h' });

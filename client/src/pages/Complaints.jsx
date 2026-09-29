@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { 
   AlertCircle, 
   Wrench, 
@@ -22,7 +23,8 @@ import {
   Layers, 
   AlertTriangle,
   ArrowRight,
-  Flame
+  Flame,
+  RotateCcw
 } from 'lucide-react';
 
 const CATEGORY_ICONS = {
@@ -31,6 +33,8 @@ const CATEGORY_ICONS = {
   cleaning: { label: 'Cleaning', icon: Sparkles, color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   internet: { label: 'WiFi / Internet', icon: Wifi, color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
   security: { label: 'Security', icon: ShieldAlert, color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
+  carpentry: { label: 'Carpentry', icon: Wrench, color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+  appliance: { label: 'Appliance', icon: Zap, color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
   other: { label: 'General', icon: Wrench, color: 'bg-slate-800 text-slate-400 border-slate-700' }
 };
 
@@ -48,6 +52,8 @@ export const Complaints = () => {
   const [categoryFilter, setCategoryFilter] = useState('all');
 
   // Modals
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  const [actualCost, setActualCost] = useState(0);
   const [isRaiseOpen, setIsRaiseOpen] = useState(false);
   const [isAssignOpen, setIsAssignOpen] = useState(false);
   const [isResolveOpen, setIsResolveOpen] = useState(false);
@@ -179,14 +185,35 @@ export const Complaints = () => {
     try {
       await api.patch('/complaints/' + selectedTicket._id + '/status', {
         status: 'resolved',
-        resolutionNote: resolutionNote || 'Resolved and inspected by maintenance team.'
+        resolutionNote: resolutionNote || 'Resolved and inspected by maintenance team.',
+        actualCost: Number(actualCost) || 0
       });
       setIsResolveOpen(false);
+      setActualCost(0);
+      setResolutionNote('');
       fetchComplaints();
     } catch (err) {
       alert('Failed to resolve complaint');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleConfirmResolution = async (ticketId) => {
+    try {
+      await api.patch(`/complaints/${ticketId}/confirm`);
+      fetchComplaints();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to confirm resolution');
+    }
+  };
+
+  const handleReopenComplaint = async (ticketId) => {
+    try {
+      await api.patch(`/complaints/${ticketId}/reopen`);
+      fetchComplaints();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to reopen complaint');
     }
   };
 
@@ -199,14 +226,14 @@ export const Complaints = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this complaint record?')) {
-      try {
-        await api.delete('/complaints/' + id);
-        fetchComplaints();
-      } catch (err) {
-        alert('Failed to delete complaint');
-      }
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    try {
+      await api.delete('/complaints/' + deleteTargetId);
+      setDeleteTargetId(null);
+      fetchComplaints();
+    } catch (err) {
+      alert('Failed to delete complaint');
     }
   };
   return (
@@ -287,6 +314,8 @@ export const Complaints = () => {
             <option value="cleaning">Cleaning</option>
             <option value="internet">Internet & WiFi</option>
             <option value="security">Security</option>
+            <option value="carpentry">Carpentry</option>
+            <option value="appliance">Appliance</option>
             <option value="other">General</option>
           </select>
 
@@ -304,12 +333,12 @@ export const Complaints = () => {
           </select>
 
           {/* Status Filter Tabs */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            {['all', 'open', 'in-progress', 'resolved'].map((st) => (
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto">
+            {['all', 'open', 'assigned', 'in-progress', 'waiting-for-parts', 'resolved', 'closed'].map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize whitespace-nowrap transition-all ${
                   statusFilter === st
                     ? 'bg-rose-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -445,15 +474,50 @@ export const Complaints = () => {
                     <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-xs text-emerald-400 flex items-center gap-2">
                       <Check className="w-3.5 h-3.5 shrink-0" />
                       <span>Resolution: {ticket.resolutionNote}</span>
+                      {ticket.actualCost > 0 && (
+                        <span className="text-slate-400 ml-auto">Cost: ₹{ticket.actualCost}</span>
+                      )}
                     </div>
                   )}
                 </div>
+
+                {/* Tenant Confirm / Reopen Actions */}
+                {isTenant && ticket.status === 'resolved' && (
+                  <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800">
+                    <span className="text-xs text-amber-400">
+                      Has this maintenance issue been completed to your satisfaction?
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleReopenComplaint(ticket._id)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold flex items-center gap-1.5 border border-amber-500/30 transition-colors"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Reopen Ticket
+                      </button>
+                      <button
+                        onClick={() => handleConfirmResolution(ticket._id)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Confirm Fix
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {ticket.status === 'closed' && (
+                  <div className="pt-2 text-xs text-emerald-400 flex items-center gap-1.5 border-t border-slate-800">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    <span>Resolution confirmed and ticket marked closed.</span>
+                  </div>
+                )}
 
                 {/* Actions (Admin & Staff) */}
                 {(isAdmin || isStaff) && (
                   <div className="pt-2 flex items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      {isAdmin && ticket.status !== 'resolved' && (
+                      {isAdmin && ticket.status !== 'resolved' && ticket.status !== 'closed' && (
                         <button
                           onClick={() => {
                             setSelectedTicket(ticket);
@@ -466,7 +530,7 @@ export const Complaints = () => {
                         </button>
                       )}
 
-                      {ticket.status !== 'resolved' && (
+                      {ticket.status !== 'resolved' && ticket.status !== 'closed' && (
                         <button
                           onClick={() => {
                             setSelectedTicket(ticket);
@@ -492,7 +556,7 @@ export const Complaints = () => {
 
                     {isAdmin && (
                       <button
-                        onClick={() => handleDelete(ticket._id)}
+                        onClick={() => setDeleteTargetId(ticket._id)}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 transition-colors"
                         title="Delete Ticket"
                       >
@@ -554,6 +618,8 @@ export const Complaints = () => {
                     <option value="cleaning">Cleaning</option>
                     <option value="internet">WiFi / Internet</option>
                     <option value="security">Security</option>
+                    <option value="carpentry">Carpentry</option>
+                    <option value="appliance">Appliance</option>
                     <option value="other">General</option>
                   </select>
                 </div>
@@ -694,6 +760,19 @@ export const Complaints = () => {
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 ></textarea>
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Actual Repair Cost (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={actualCost}
+                  onChange={(e) => setActualCost(e.target.value)}
+                  placeholder="0"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -713,6 +792,15 @@ export const Complaints = () => {
           </div>
         </div>
       )}
+
+      {/* Reusable Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetId}
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Maintenance Ticket"
+        message="Are you sure you want to permanently delete this maintenance ticket? This action cannot be reversed."
+      />
     </div>
   );
 };

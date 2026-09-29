@@ -332,3 +332,54 @@ export const updateProfile = async (req, res) => {
     return handleControllerError(res, error, 'updating profile');
   }
 };
+
+// @desc    Toggle staff/admin active status
+// @route   PATCH /api/auth/users/:id/status
+// @access  Private (Admin only)
+export const updateStaffStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (req.user._id.toString() === id.toString()) {
+      return res.status(400).json({ success: false, message: 'You cannot deactivate your own account' });
+    }
+
+    const targetUser = await User.findById(id);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (targetUser.role === 'tenant') {
+      return res.status(400).json({ success: false, message: 'This endpoint is for staff and admin accounts only. Use tenant checkout/management for tenants.' });
+    }
+
+    targetUser.isActive = !targetUser.isActive;
+    await targetUser.save();
+
+    await logActivity({
+      user: req.user,
+      action: targetUser.isActive ? 'ACTIVATE_STAFF' : 'DEACTIVATE_STAFF',
+      entity: 'User',
+      entityId: targetUser._id,
+      description: `Admin ${req.user.name} ${targetUser.isActive ? 'activated' : 'deactivated'} ${targetUser.role} account ${targetUser.name}`
+    });
+
+    return res.json({
+      success: true,
+      message: `Staff account ${targetUser.isActive ? 'activated' : 'deactivated'} successfully`,
+      data: {
+        _id: targetUser._id,
+        name: targetUser.name,
+        email: targetUser.email,
+        role: targetUser.role,
+        isActive: targetUser.isActive
+      }
+    });
+  } catch (error) {
+    return handleControllerError(res, error, 'updating staff status');
+  }
+};
+

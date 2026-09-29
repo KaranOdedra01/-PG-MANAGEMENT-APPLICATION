@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider } from './context/AuthContext';
+import { SettingsProvider } from './context/SettingsContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -17,12 +18,18 @@ import { Notices } from './pages/Notices';
 import { Mess } from './pages/Mess';
 import { Visitors } from './pages/Visitors';
 import { Reports } from './pages/Reports';
+import { Settings } from './pages/Settings';
+import { StaffManagement } from './pages/StaffManagement';
+import { Profile } from './pages/Profile';
+import { Notifications } from './pages/Notifications';
+import { MyTasks } from './pages/MyTasks';
 
 export function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
+        <SettingsProvider>
+          <BrowserRouter>
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
@@ -131,6 +138,56 @@ export function App() {
               } 
             />
 
+            {/* Settings & Info */}
+            <Route 
+              path="settings" 
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'tenant', 'staff']}>
+                  <Settings />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Staff Management */}
+            <Route 
+              path="staff-management" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <StaffManagement />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Profile */}
+            <Route 
+              path="profile" 
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'tenant', 'staff']}>
+                  <Profile />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Notifications */}
+            <Route 
+              path="notifications" 
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'tenant', 'staff']}>
+                  <Notifications />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* My Tasks */}
+            <Route 
+              path="my-tasks" 
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                  <MyTasks />
+                </ProtectedRoute>
+              } 
+            />
+
             {/* Fallback */}
             <Route path="*" element={<DashboardOverview />} />
           </Route>
@@ -138,9 +195,10 @@ export function App() {
           {/* Catch-all */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-      </BrowserRouter>
-    </AuthProvider>
-  </ThemeProvider>
+        </BrowserRouter>
+        </SettingsProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

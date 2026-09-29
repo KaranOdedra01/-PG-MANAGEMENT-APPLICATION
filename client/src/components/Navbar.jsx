@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { LogOut, User, Bell, Check, CheckCheck, Menu, Building2, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useSettings } from '../context/SettingsContext';
 import api from '../api/axios';
 
 export const Navbar = ({ onToggleSidebar }) => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
+  const { settings } = useSettings();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -71,7 +73,7 @@ export const Navbar = ({ onToggleSidebar }) => {
 
         <div className="hidden sm:flex items-center gap-2 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
           <Building2 className="w-3.5 h-3.5 text-indigo-400" />
-          Greenwood PG Living
+          {settings?.hostelName || 'Greenwood PG Living'}
         </div>
       </div>
 

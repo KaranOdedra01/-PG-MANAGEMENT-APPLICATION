@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
@@ -134,11 +134,16 @@ export const Tenants = () => {
   const openEditModal = (t) => {
     setEditingTenant(t);
     setEditFormData({
-      phone: t.phone,
-      securityDeposit: t.securityDeposit,
-      idProofType: t.idProofType,
+      phone: t.phone || '',
+      securityDeposit: t.securityDeposit || 0,
+      idProofType: t.idProofType || 'Aadhaar',
       idProofNumber: t.idProofNumber || '',
-      emergencyContact: t.emergencyContact || { name: '', phone: '', relation: '' }
+      status: t.status || 'active',
+      emergencyContact: {
+        name: t.emergencyContact?.name || '',
+        phone: t.emergencyContact?.phone || '',
+        relation: t.emergencyContact?.relation || ''
+      }
     });
     setIsEditOpen(true);
   };
@@ -604,26 +609,113 @@ export const Tenants = () => {
             </div>
 
             <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number</label>
-                <input
-                  type="tel"
-                  required
-                  value={editFormData.phone}
-                  onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number</label>
+                  <input
+                    type="tel"
+                    required
+                    value={editFormData.phone}
+                    onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Security Deposit (₹)</label>
+                  <input
+                    type="number"
+                    required
+                    value={editFormData.securityDeposit}
+                    onChange={(e) => setEditFormData({ ...editFormData, securityDeposit: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">ID Document Type</label>
+                  <select
+                    value={editFormData.idProofType}
+                    onChange={(e) => setEditFormData({ ...editFormData, idProofType: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Aadhaar">Aadhaar Card</option>
+                    <option value="Passport">Passport</option>
+                    <option value="Driving License">Driving License</option>
+                    <option value="College ID">College ID / Voter ID</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">ID Number</label>
+                  <input
+                    type="text"
+                    value={editFormData.idProofNumber}
+                    onChange={(e) => setEditFormData({ ...editFormData, idProofNumber: e.target.value })}
+                    placeholder="e.g. XXXX-5544"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Status */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Security Deposit (₹)</label>
-                <input
-                  type="number"
-                  required
-                  value={editFormData.securityDeposit}
-                  onChange={(e) => setEditFormData({ ...editFormData, securityDeposit: Number(e.target.value) })}
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Tenant Status</label>
+                <select
+                  value={editFormData.status}
+                  onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
-                />
+                >
+                  <option value="active">Active Resident</option>
+                  <option value="notice-period">Serving Notice Period</option>
+                  <option value="checked-out">Checked Out</option>
+                </select>
+                {editFormData.status === 'checked-out' && (
+                  <p className="text-[11px] text-amber-400 mt-1">
+                    ⚠️ Note: Changing status to "Checked Out" here updates records, but does NOT release bed allocation. Use the "Check-Out" button on the tenant card for full bed release.
+                  </p>
+                )}
+              </div>
+
+              {/* Emergency Contact */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                  Emergency Contact
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Name"
+                    value={editFormData.emergencyContact?.name || ''}
+                    onChange={(e) => setEditFormData({
+                      ...editFormData,
+                      emergencyContact: { ...editFormData.emergencyContact, name: e.target.value }
+                    })}
+                    className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Phone"
+                    value={editFormData.emergencyContact?.phone || ''}
+                    onChange={(e) => setEditFormData({
+                      ...editFormData,
+                      emergencyContact: { ...editFormData.emergencyContact, phone: e.target.value }
+                    })}
+                    className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Relation"
+                    value={editFormData.emergencyContact?.relation || ''}
+                    onChange={(e) => setEditFormData({
+                      ...editFormData,
+                      emergencyContact: { ...editFormData.emergencyContact, relation: e.target.value }
+                    })}
+                    className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
 
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-3">

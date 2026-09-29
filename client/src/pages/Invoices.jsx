@@ -3,11 +3,29 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { 
   Receipt, DollarSign, Download, CheckCircle2, Clock, AlertCircle, 
   Search, Plus, Layers, Calendar, CreditCard, User, DoorOpen, 
   Trash2, RefreshCw, X, Send, Zap 
 } from 'lucide-react';
+
+const formatMonthInputToLabel = (yyyyMm) => {
+  if (!yyyyMm || yyyyMm === 'all') return '';
+  const parts = yyyyMm.split('-');
+  if (parts.length !== 2) return yyyyMm;
+  const date = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+  return date.toLocaleString('default', { month: 'long', year: 'numeric' });
+};
+
+const formatLabelToMonthInput = (label) => {
+  if (!label) return '';
+  const date = new Date(label);
+  if (isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
 
 export const Invoices = () => {
   const { user } = useAuth();
@@ -21,6 +39,7 @@ export const Invoices = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [monthFilter, setMonthFilter] = useState('all');
 
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [isSingleModalOpen, setIsSingleModalOpen] = useState(false);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
@@ -35,10 +54,13 @@ export const Invoices = () => {
 
   const [singleData, setSingleData] = useState({
     tenantId: '',
-    month: 'August 2026',
+    month: 'September 2026',
     baseRent: 7500,
     electricityCharge: 400,
     maintenanceFee: 200,
+    messFee: 0,
+    lateFee: 0,
+    discount: 0,
     dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
@@ -94,9 +116,15 @@ export const Invoices = () => {
       (i.roomNumber && i.roomNumber.includes(q)) ||
       (i.month && i.month.toLowerCase().includes(q));
     const matchesStatus = statusFilter === 'all' || i.status === statusFilter;
-    const matchesMonth = monthFilter === 'all' || (i.month && i.month.toLowerCase().includes(monthFilter.toLowerCase()));
+    const monthLabel = formatMonthInputToLabel(monthFilter).toLowerCase();
+    const matchesMonth = monthFilter === 'all' || 
+      (i.month && (
+        i.month.toLowerCase().includes(monthFilter.toLowerCase()) ||
+        (monthLabel && i.month.toLowerCase().includes(monthLabel))
+      ));
     return matchesSearch && matchesStatus && matchesMonth;
   });
+
   const handleBatchSubmit = async (e) => {
     e.preventDefault();
     setModalError('');
@@ -141,14 +169,14 @@ export const Invoices = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this invoice?')) {
-      try {
-        await api.delete('/invoices/' + id);
-        fetchInvoices();
-      } catch (err) {
-        alert('Failed to delete invoice');
-      }
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    try {
+      await api.delete('/invoices/' + deleteTargetId);
+      setDeleteTargetId(null);
+      fetchInvoices();
+    } catch (err) {
+      alert('Failed to delete invoice');
     }
   };
 
@@ -303,18 +331,38 @@ export const Invoices = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            {['all', 'paid', 'pending', 'overdue'].map((st) => (
+          {/* Month Filter Picker */}
+          <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 text-xs">
+            <span className="text-slate-500 text-[11px]">Month:</span>
+            <input
+              type="month"
+              value={monthFilter === 'all' ? '' : monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value || 'all')}
+              className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
+            />
+            {monthFilter !== 'all' && (
+              <button
+                onClick={() => setMonthFilter('all')}
+                className="p-0.5 text-slate-400 hover:text-slate-200"
+                title="Clear Month Filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto">
+            {['all', 'paid', 'partially_paid', 'pending', 'overdue'].map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
+                className={`px-3 py-1 rounded-lg text-xs font-semibold capitalize whitespace-nowrap transition-all ${
                   statusFilter === st
                     ? 'bg-amber-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {st}
+                {st.replace('_', ' ')}
               </button>
             ))}
           </div>
@@ -364,10 +412,14 @@ export const Invoices = () => {
                         className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
                           isPaid
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            : inv.status === 'partially_paid'
+                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                            : inv.status === 'overdue'
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                            : 'bg-slate-800 text-slate-300 border-slate-700'
                         }`}
                       >
-                        {inv.status}
+                        {inv.status === 'partially_paid' ? 'Partially Paid' : inv.status}
                       </span>
                     </div>
 
@@ -382,6 +434,9 @@ export const Invoices = () => {
                       <span>Rent: <span className="text-slate-200 font-medium">₹{inv.baseRent}</span></span>
                       <span>+ Electricity: <span className="text-slate-200 font-medium">₹{inv.electricityCharge || 0}</span></span>
                       <span>+ Maintenance: <span className="text-slate-200 font-medium">₹{inv.maintenanceFee || 0}</span></span>
+                      {inv.messFee > 0 && <span>+ Mess: <span className="text-slate-200 font-medium">₹{inv.messFee}</span></span>}
+                      {inv.lateFee > 0 && <span>+ Late Fee: <span className="text-rose-400 font-medium">₹{inv.lateFee}</span></span>}
+                      {inv.discount > 0 && <span>- Discount: <span className="text-emerald-400 font-medium">₹{inv.discount}</span></span>}
                     </div>
                   </div>
                 </div>
@@ -417,7 +472,7 @@ export const Invoices = () => {
 
                     {isAdmin && (
                       <button
-                        onClick={() => handleDelete(inv._id)}
+                        onClick={() => setDeleteTargetId(inv._id)}
                         className="p-2 rounded-xl bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 transition-colors"
                         title="Delete Invoice"
                       >
@@ -458,14 +513,18 @@ export const Invoices = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Billing Month *</label>
-                <input
-                  type="text"
-                  required
-                  value={batchData.month}
-                  onChange={(e) => setBatchData({ ...batchData, month: e.target.value })}
-                  placeholder="e.g. September 2026"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="month"
+                    required
+                    value={formatLabelToMonthInput(batchData.month)}
+                    onChange={(e) => setBatchData({ ...batchData, month: formatMonthInputToLabel(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-amber-400 whitespace-nowrap bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
+                    {batchData.month}
+                  </span>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -564,13 +623,13 @@ export const Invoices = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Month *</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Billing Month *</label>
                   <input
-                    type="text"
+                    type="month"
                     required
-                    value={singleData.month}
-                    onChange={(e) => setSingleData({ ...singleData, month: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                    value={formatLabelToMonthInput(singleData.month)}
+                    onChange={(e) => setSingleData({ ...singleData, month: formatMonthInputToLabel(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
                   />
                 </div>
 
@@ -598,15 +657,57 @@ export const Invoices = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Due Date *</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Maintenance Fee (₹)</label>
                   <input
-                    type="date"
-                    required
-                    value={singleData.dueDate}
-                    onChange={(e) => setSingleData({ ...singleData, dueDate: e.target.value })}
+                    type="number"
+                    value={singleData.maintenanceFee}
+                    onChange={(e) => setSingleData({ ...singleData, maintenanceFee: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Mess Fee (₹)</label>
+                  <input
+                    type="number"
+                    value={singleData.messFee}
+                    onChange={(e) => setSingleData({ ...singleData, messFee: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Late Fine (₹)</label>
+                  <input
+                    type="number"
+                    value={singleData.lateFee}
+                    onChange={(e) => setSingleData({ ...singleData, lateFee: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Discount (₹)</label>
+                  <input
+                    type="number"
+                    value={singleData.discount}
+                    onChange={(e) => setSingleData({ ...singleData, discount: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Payment Due Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={singleData.dueDate}
+                  onChange={(e) => setSingleData({ ...singleData, dueDate: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
               </div>
 
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-3">
@@ -706,6 +807,15 @@ export const Invoices = () => {
           </div>
         </div>
       )}
+
+      {/* Reusable Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetId}
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Rent Invoice"
+        message="Are you sure you want to permanently delete this rent invoice? This will remove all associated billing and ledger records."
+      />
     </div>
   );
 };

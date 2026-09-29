@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import api from '../api/axios';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -23,7 +24,9 @@ import {
 
 export const Reports = () => {
   const { user } = useAuth();
+  const { settings } = useSettings();
   const isAdmin = user?.role === 'admin';
+  const hostelTitle = settings?.hostelName || 'PG MANAGEMENT SYSTEM';
 
   const [activeTab, setActiveTab] = useState('financial'); // 'financial' | 'occupancy' | 'complaints' | 'visitors'
   const [summary, setSummary] = useState(null);
@@ -33,12 +36,20 @@ export const Reports = () => {
   const [visitors, setVisitors] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Month range filters for Financial report
+  const [fromMonth, setFromMonth] = useState('');
+  const [toMonth, setToMonth] = useState('');
+
   const fetchReports = async () => {
     try {
       setLoading(true);
+      const finParams = {};
+      if (fromMonth) finParams.startDate = fromMonth;
+      if (toMonth) finParams.endDate = toMonth;
+
       const [sumRes, finRes, occRes, cmpRes, visRes] = await Promise.all([
         api.get('/reports/summary'),
-        api.get('/reports/financial'),
+        api.get('/reports/financial', { params: finParams }),
         api.get('/reports/occupancy'),
         api.get('/complaints'),
         api.get('/visitors')
@@ -58,7 +69,8 @@ export const Reports = () => {
 
   useEffect(() => {
     fetchReports();
-  }, [user]);
+  }, [user, fromMonth, toMonth]);
+
   // PDF Report Generator
   const generatePDFReport = () => {
     const doc = new jsPDF();
@@ -68,9 +80,9 @@ export const Reports = () => {
     doc.rect(0, 0, 210, 45, 'F');
 
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(22);
+    doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
-    doc.text('PG MANAGEMENT SYSTEM', 15, 20);
+    doc.text(hostelTitle.toUpperCase(), 15, 20);
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
@@ -187,7 +199,7 @@ export const Reports = () => {
     doc.line(135, finalY + 8, 195, finalY + 8);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text('PG Management Operations', 135, finalY + 14);
+    doc.text(hostelTitle, 135, finalY + 14);
 
     doc.save('PG_Audit_Report_' + activeTab + '_' + new Date().toISOString().split('T')[0] + '.pdf');
   };
@@ -201,7 +213,7 @@ export const Reports = () => {
       headers = ['Month', 'Tenant Name', 'Room #', 'Base Rent', 'Electricity', 'Maintenance', 'Total Amount', 'Status', 'Payment Mode'];
       rows = (financialData?.invoices || []).map(i => [
         i.month,
-        '"' + i.tenantName + '"',
+        '"' + (i.tenantName || 'Resident').replace(/"/g, '""') + '"',
         i.roomNumber,
         i.baseRent,
         i.electricityCharge || 0,
@@ -221,6 +233,29 @@ export const Reports = () => {
         r.availableBeds,
         r.occupancyRate,
         r.rent
+      ]);
+    } else if (activeTab === 'complaints') {
+      headers = ['Ticket Title', 'Category', 'Room #', 'Priority', 'Status', 'Assigned Staff', 'Created Date'];
+      rows = complaints.map(c => [
+        '"' + (c.title || '').replace(/"/g, '""') + '"',
+        c.category,
+        c.roomNumber,
+        c.priority,
+        c.status,
+        '"' + (c.assignedStaffId?.name || 'Unassigned').replace(/"/g, '""') + '"',
+        new Date(c.createdAt).toLocaleDateString()
+      ]);
+    } else if (activeTab === 'visitors') {
+      headers = ['Visitor Name', 'Phone', 'Type', 'Room #', 'Host Tenant', 'Entry Time', 'Exit Time', 'Status'];
+      rows = visitors.map(v => [
+        '"' + (v.name || '').replace(/"/g, '""') + '"',
+        v.phone,
+        v.visitorType,
+        v.roomNumber,
+        '"' + (v.tenantName || '').replace(/"/g, '""') + '"',
+        new Date(v.entryTime).toLocaleString(),
+        v.exitTime ? new Date(v.exitTime).toLocaleString() : 'Inside Premises',
+        v.status
       ]);
     }
 
@@ -349,6 +384,47 @@ export const Reports = () => {
               {activeTab === 'visitors' && visitors.length + ' Logs'}
             </span>
           </div>
+
+          {/* Month Range Filter for Financial Reports */}
+          {activeTab === 'financial' && (
+            <div className="mb-4 p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs font-semibold text-slate-300">Filter By Billing Period:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-400">From:</span>
+                  <input
+                    type="month"
+                    value={fromMonth}
+                    onChange={(e) => setFromMonth(e.target.value)}
+                    className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-400">To:</span>
+                  <input
+                    type="month"
+                    value={toMonth}
+                    onChange={(e) => setToMonth(e.target.value)}
+                    className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                {(fromMonth || toMonth) && (
+                  <button
+                    onClick={() => {
+                      setFromMonth('');
+                      setToMonth('');
+                    }}
+                    className="text-xs text-rose-400 hover:text-rose-300 underline font-medium"
+                  >
+                    Reset Period
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             {activeTab === 'financial' && (

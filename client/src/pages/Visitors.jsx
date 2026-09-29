@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
@@ -22,12 +22,14 @@ import {
   Layers,
   Sparkles
 } from 'lucide-react';
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 
 const VISITOR_TYPES = {
   Family: { label: 'Family', icon: Users, color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
   Friend: { label: 'Friend', icon: Sparkles, color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   Delivery: { label: 'Delivery', icon: Truck, color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   Maintenance: { label: 'Service / Worker', icon: Wrench, color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  Official: { label: 'Official / Inspection', icon: ShieldCheck, color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
   Other: { label: 'General', icon: Users, color: 'bg-slate-800 text-slate-400 border-slate-700' }
 };
 
@@ -37,10 +39,12 @@ export const Visitors = () => {
 
   const [visitors, setVisitors] = useState([]);
   const [activeStats, setActiveStats] = useState(null);
+  const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
 
   // Modal
   const [isCheckinOpen, setIsCheckinOpen] = useState(false);
@@ -48,7 +52,7 @@ export const Visitors = () => {
     name: '',
     phone: '',
     visitorType: 'Friend',
-    roomNumber: '102',
+    roomNumber: '101',
     tenantName: '',
     purpose: 'Casual Visit',
     vehicleNumber: ''
@@ -59,12 +63,14 @@ export const Visitors = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [listRes, actRes] = await Promise.all([
+      const [listRes, actRes, roomRes] = await Promise.all([
         api.get('/visitors'),
-        api.get('/visitors/active')
+        api.get('/visitors/active'),
+        api.get('/rooms').catch(() => ({ data: { data: [] } }))
       ]);
       if (listRes.data?.success) setVisitors(listRes.data.data);
       if (actRes.data?.success) setActiveStats(actRes.data.data);
+      if (roomRes.data?.success) setRooms(roomRes.data.data);
     } catch (err) {
       console.error('Failed to load visitors:', err);
     } finally {
@@ -87,13 +93,16 @@ export const Visitors = () => {
     const matchesType = typeFilter === 'all' || v.visitorType.toLowerCase() === typeFilter.toLowerCase();
     return matchesSearch && matchesStatus && matchesType;
   });
+
   const openCheckinModal = () => {
+    const defaultRoom = rooms[0]?.roomNumber || '101';
+    const defaultTenant = rooms[0]?.tenants?.[0]?.name || '';
     setFormData({
       name: '',
       phone: '',
       visitorType: 'Friend',
-      roomNumber: '102',
-      tenantName: '',
+      roomNumber: defaultRoom,
+      tenantName: defaultTenant,
       purpose: 'Casual Visit',
       vehicleNumber: ''
     });
@@ -125,14 +134,14 @@ export const Visitors = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this visitor log entry?')) {
-      try {
-        await api.delete('/visitors/' + id);
-        fetchData();
-      } catch (err) {
-        alert('Failed to delete visitor log');
-      }
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    try {
+      await api.delete('/visitors/' + deleteTargetId);
+      setDeleteTargetId(null);
+      fetchData();
+    } catch (err) {
+      alert('Failed to delete visitor log');
     }
   };
 
@@ -254,6 +263,7 @@ export const Visitors = () => {
             <option value="friend">Friend</option>
             <option value="delivery">Delivery</option>
             <option value="maintenance">Service / Worker</option>
+            <option value="official">Official / Inspection</option>
             <option value="other">Other</option>
           </select>
 
@@ -376,7 +386,7 @@ export const Visitors = () => {
 
                     {isAdmin && (
                       <button
-                        onClick={() => handleDelete(vis._id)}
+                        onClick={() => setDeleteTargetId(vis._id)}
                         className="p-2 rounded-xl bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 transition-colors"
                         title="Delete Visitor Log"
                       >
@@ -449,6 +459,7 @@ export const Visitors = () => {
                     <option value="Family">Family</option>
                     <option value="Delivery">Delivery</option>
                     <option value="Maintenance">Service / Worker</option>
+                    <option value="Official">Official / Inspection</option>
                     <option value="Other">Other</option>
                   </select>
                 </div>
@@ -457,14 +468,35 @@ export const Visitors = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Room Number *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 102"
-                    value={formData.roomNumber}
-                    onChange={(e) => setFormData({ ...formData, roomNumber: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-teal-500"
-                  />
+                  {rooms.length > 0 ? (
+                    <select
+                      required
+                      value={formData.roomNumber}
+                      onChange={(e) => {
+                        const chosen = e.target.value;
+                        const roomObj = rooms.find(r => r.roomNumber === chosen);
+                        const hostName = roomObj?.tenants?.[0]?.name || formData.tenantName;
+                        setFormData({ ...formData, roomNumber: chosen, tenantName: hostName });
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="">Select Room</option>
+                      {rooms.map(r => (
+                        <option key={r._id || r.roomNumber} value={r.roomNumber}>
+                          Room {r.roomNumber} (Floor {r.floor} • {r.type})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. 102"
+                      value={formData.roomNumber}
+                      onChange={(e) => setFormData({ ...formData, roomNumber: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-teal-500"
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -523,6 +555,15 @@ export const Visitors = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetId}
+        title="Delete Visitor Entry"
+        message="Are you sure you want to delete this visitor log entry? This action cannot be undone."
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTargetId(null)}
+      />
     </div>
   );
 };

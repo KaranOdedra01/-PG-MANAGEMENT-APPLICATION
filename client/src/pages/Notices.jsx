@@ -1,6 +1,7 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { 
   Megaphone, 
   Pin, 
@@ -28,6 +29,7 @@ const NOTICE_CATEGORIES = {
   maintenance: { label: 'Maintenance', icon: Wrench, color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   rules: { label: 'Rules & Timings', icon: ShieldAlert, color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
   events: { label: 'Events & Mess', icon: Sparkles, color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
+  emergency: { label: 'Emergency', icon: Flame, color: 'bg-rose-600/10 text-rose-500 border-rose-500/20' },
   general: { label: 'General', icon: Megaphone, color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' }
 };
 
@@ -43,6 +45,7 @@ export const Notices = () => {
   const [priorityFilter, setPriorityFilter] = useState('all');
 
   // Modals
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingNotice, setEditingNotice] = useState(null);
   const [formData, setFormData] = useState({
@@ -139,14 +142,14 @@ export const Notices = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this notice?')) {
-      try {
-        await api.delete('/notices/' + id);
-        fetchNotices();
-      } catch (err) {
-        alert('Failed to delete notice');
-      }
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    try {
+      await api.delete('/notices/' + deleteTargetId);
+      setDeleteTargetId(null);
+      fetchNotices();
+    } catch (err) {
+      alert('Failed to delete notice');
     }
   };
   return (
@@ -337,7 +340,7 @@ export const Notices = () => {
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDelete(notice._id)}
+                        onClick={() => setDeleteTargetId(notice._id)}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 transition-colors"
                         title="Delete Notice"
                       >
@@ -398,6 +401,7 @@ export const Notices = () => {
                     <option value="maintenance">Maintenance</option>
                     <option value="rules">Rules & Policies</option>
                     <option value="events">Events & Mess</option>
+                    <option value="emergency">Emergency Broadcast</option>
                   </select>
                 </div>
 
@@ -413,6 +417,43 @@ export const Notices = () => {
                     <option value="high">High</option>
                     <option value="urgent">Urgent</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Target Audience */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Target Audience</label>
+                <div className="flex flex-wrap items-center gap-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  {[
+                    { id: 'all', label: 'All (Everyone)' },
+                    { id: 'tenant', label: 'Tenants Only' },
+                    { id: 'staff', label: 'Staff Only' },
+                    { id: 'admin', label: 'Admin Only' }
+                  ].map((roleOpt) => (
+                    <label key={roleOpt.id} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.targetRoles.includes(roleOpt.id)}
+                        onChange={(e) => {
+                          let next;
+                          if (roleOpt.id === 'all') {
+                            next = e.target.checked ? ['all'] : [];
+                          } else {
+                            const withoutAll = formData.targetRoles.filter(r => r !== 'all');
+                            if (e.target.checked) {
+                              next = [...withoutAll, roleOpt.id];
+                            } else {
+                              next = withoutAll.filter(r => r !== roleOpt.id);
+                            }
+                            if (next.length === 0) next = ['all'];
+                          }
+                          setFormData(prev => ({ ...prev, targetRoles: next }));
+                        }}
+                        className="w-3.5 h-3.5 rounded text-violet-600 bg-slate-900 border-slate-700"
+                      />
+                      <span>{roleOpt.label}</span>
+                    </label>
+                  ))}
                 </div>
               </div>
 
@@ -462,6 +503,15 @@ export const Notices = () => {
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetId}
+        onCancel={() => setDeleteTargetId(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Announcement"
+        message="Are you sure you want to remove this notice? It will be removed from all resident dashboards."
+      />
     </div>
   );
 };

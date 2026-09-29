@@ -127,6 +127,37 @@ export const Mess = () => {
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // Change Plan Modal
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [planFormData, setPlanFormData] = useState({
+    plan: 'full',
+    diet: 'Vegetarian'
+  });
+  const [planSubmitting, setPlanSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (mySubscription?.subscription) {
+      setPlanFormData({
+        plan: mySubscription.subscription.plan || 'full',
+        diet: mySubscription.subscription.diet || 'Vegetarian'
+      });
+    }
+  }, [mySubscription]);
+
+  const handlePlanSubmit = async (e) => {
+    e.preventDefault();
+    setPlanSubmitting(true);
+    try {
+      await api.patch('/mess/plan', planFormData);
+      setIsPlanModalOpen(false);
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update meal plan');
+    } finally {
+      setPlanSubmitting(false);
+    }
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -290,9 +321,24 @@ export const Mess = () => {
                 Toggle if you plan to skip a meal today to help us eliminate food waste.
               </p>
             </div>
-            <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 self-start sm:self-auto">
-              Plan: {mySubscription.subscription?.plan?.toUpperCase()} (₹{mySubscription.subscription?.monthlyCharge}/mo)
-            </span>
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+                Plan: {mySubscription.subscription?.plan?.toUpperCase()} (₹{mySubscription.subscription?.monthlyCharge}/mo • {mySubscription.subscription?.diet || 'Veg'})
+              </span>
+              <button
+                onClick={() => {
+                  setPlanFormData({
+                    plan: mySubscription.subscription?.plan || 'full',
+                    diet: mySubscription.subscription?.diet || 'Vegetarian'
+                  });
+                  setIsPlanModalOpen(true);
+                }}
+                className="px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                Change Plan
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -557,6 +603,92 @@ export const Mess = () => {
                   className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white transition-all disabled:opacity-50"
                 >
                   {submitting ? 'Saving...' : 'Save Menu'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Change Meal Plan Modal (Tenant) */}
+      {isPlanModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <UtensilsCrossed className="w-5 h-5 text-indigo-400" />
+                Update Meal Plan & Diet
+              </h3>
+              <button onClick={() => setIsPlanModalOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePlanSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">Select Subscription Plan</label>
+                <div className="space-y-2">
+                  {[
+                    { id: 'full', name: 'Full Meal Plan', desc: 'Breakfast, Lunch & Dinner', price: '₹3,500 / mo' },
+                    { id: '2-meal', name: '2-Meal Plan', desc: 'Breakfast & Dinner only', price: '₹2,800 / mo' },
+                    { id: 'none', name: 'No Mess (Opt-out)', desc: 'Zero meal charges included', price: '₹0 / mo' }
+                  ].map((p) => (
+                    <label
+                      key={p.id}
+                      className={`flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-all ${
+                        planFormData.plan === p.id
+                          ? 'bg-indigo-500/10 border-indigo-500/40 text-slate-100'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="radio"
+                          name="mealPlan"
+                          value={p.id}
+                          checked={planFormData.plan === p.id}
+                          onChange={(e) => setPlanFormData({ ...planFormData, plan: e.target.value })}
+                          className="text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-slate-200 block">{p.name}</span>
+                          <span className="text-[11px] text-slate-500 block">{p.desc}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold text-indigo-400">{p.price}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Diet Preference</label>
+                <select
+                  value={planFormData.diet}
+                  onChange={(e) => setPlanFormData({ ...planFormData, diet: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="Vegetarian">Vegetarian (Pure Veg)</option>
+                  <option value="Non-Vegetarian">Non-Vegetarian</option>
+                  <option value="Eggetarian">Eggetarian</option>
+                  <option value="Jain">Jain (No Onion / Garlic)</option>
+                </select>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPlanModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={planSubmitting}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-all disabled:opacity-50"
+                >
+                  {planSubmitting ? 'Saving...' : 'Update Plan'}
                 </button>
               </div>
             </form>

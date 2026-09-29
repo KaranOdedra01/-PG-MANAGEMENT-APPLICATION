@@ -257,37 +257,46 @@ export const DashboardOverview = () => {
                 Room Inventory by Type
               </h3>
 
-              <div className="space-y-3.5">
-                <div>
-                  <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
-                    <span>Single Bed Rooms</span>
-                    <span className="text-indigo-400 font-bold">{stats.roomTypes.single} Units</span>
-                  </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div className="bg-indigo-500 h-full rounded-full" style={{ width: '40%' }}></div>
-                  </div>
-                </div>
+              {(() => {
+                const totalUnits = ((stats.roomTypes?.single || 0) + (stats.roomTypes?.double || 0) + (stats.roomTypes?.triple || 0)) || 1;
+                const singlePct = Math.round(((stats.roomTypes?.single || 0) / totalUnits) * 100);
+                const doublePct = Math.round(((stats.roomTypes?.double || 0) / totalUnits) * 100);
+                const triplePct = Math.round(((stats.roomTypes?.triple || 0) / totalUnits) * 100);
 
-                <div>
-                  <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
-                    <span>Double Sharing Rooms</span>
-                    <span className="text-emerald-400 font-bold">{stats.roomTypes.double} Units</span>
-                  </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: '50%' }}></div>
-                  </div>
-                </div>
+                return (
+                  <div className="space-y-3.5">
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
+                        <span>Single Bed Rooms</span>
+                        <span className="text-indigo-400 font-bold">{stats.roomTypes?.single || 0} Units ({singlePct}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className="bg-indigo-500 h-full rounded-full transition-all duration-500" style={{ width: `${singlePct}%` }}></div>
+                      </div>
+                    </div>
 
-                <div>
-                  <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
-                    <span>Triple Sharing Rooms</span>
-                    <span className="text-amber-400 font-bold">{stats.roomTypes.triple} Units</span>
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
+                        <span>Double Sharing Rooms</span>
+                        <span className="text-emerald-400 font-bold">{stats.roomTypes?.double || 0} Units ({doublePct}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${doublePct}%` }}></div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
+                        <span>Triple Sharing Rooms</span>
+                        <span className="text-amber-400 font-bold">{stats.roomTypes?.triple || 0} Units ({triplePct}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className="bg-amber-500 h-full rounded-full transition-all duration-500" style={{ width: `${triplePct}%` }}></div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div className="bg-amber-500 h-full rounded-full" style={{ width: '20%' }}></div>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               <div className="mt-5 p-3 rounded-xl bg-slate-800/40 border border-slate-700/50 flex items-center justify-between text-xs">
                 <span className="text-slate-400">Total PG Capacity:</span>
@@ -450,14 +459,35 @@ export const DashboardOverview = () => {
               Hostel Facility Status
             </h3>
             <div className="space-y-3 text-xs text-slate-300">
-              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700 flex justify-between">
+              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700 flex justify-between items-center">
                 <span>Rooms Under Maintenance:</span>
-                <span className="font-bold text-amber-400">{stats.roomsUnderMaintenance}</span>
+                <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">{stats.roomsUnderMaintenance}</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700 flex justify-between">
-                <span>Total Inspected Rooms:</span>
+              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700 flex justify-between items-center">
+                <span>Total Hostel Rooms:</span>
                 <span className="font-bold text-slate-100">{stats.totalRooms}</span>
               </div>
+              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700 flex justify-between items-center">
+                <span>Urgent / High Priority Tasks:</span>
+                <span className="font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">{stats.maintenance?.highPriority || 0}</span>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-slate-800 space-y-2">
+              <Link
+                to="/my-tasks"
+                className="w-full py-2 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                Go to My Assigned Queue
+              </Link>
+              <Link
+                to="/rooms"
+                className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <DoorOpen className="w-3.5 h-3.5" />
+                Inspect Rooms Directory
+              </Link>
             </div>
           </div>
         </div>

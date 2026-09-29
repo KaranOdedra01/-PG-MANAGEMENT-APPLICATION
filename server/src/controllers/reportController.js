@@ -124,9 +124,52 @@ export const getExecutiveSummary = async (req, res) => {
 // @access  Private (Admin Only)
 export const getFinancialReport = async (req, res) => {
   try {
+    const { startDate, endDate, limit } = req.query;
+    const invDateFilter = {};
+    const expDateFilter = {};
+
+    if (startDate || endDate) {
+      let start, end;
+      if (startDate) {
+        if (/^\d{4}-\d{2}$/.test(startDate)) {
+          const [y, m] = startDate.split('-').map(Number);
+          start = new Date(y, m - 1, 1, 0, 0, 0);
+        } else {
+          start = new Date(startDate);
+        }
+      }
+      if (endDate) {
+        if (/^\d{4}-\d{2}$/.test(endDate)) {
+          const [y, m] = endDate.split('-').map(Number);
+          end = new Date(y, m, 0, 23, 59, 59, 999);
+        } else {
+          end = new Date(endDate);
+        }
+      }
+
+      if (start) {
+        invDateFilter.$gte = start;
+        expDateFilter.$gte = start;
+      }
+      if (end) {
+        invDateFilter.$lte = end;
+        expDateFilter.$lte = end;
+      }
+    }
+
+    const invoiceMatch = { status: 'paid' };
+    if (Object.keys(invDateFilter).length > 0) {
+      invoiceMatch.createdAt = invDateFilter;
+    }
+
+    const expenseMatch = {};
+    if (Object.keys(expDateFilter).length > 0) {
+      expenseMatch.date = expDateFilter;
+    }
+
     // 1. Revenue by Month Aggregation
     const monthlyRevenue = await Invoice.aggregate([
-      { $match: { status: 'paid' } },
+      { $match: invoiceMatch },
       {
         $group: {
           _id: '$month',
@@ -139,6 +182,7 @@ export const getFinancialReport = async (req, res) => {
 
     // 2. Expenses by Category Aggregation
     const expensesByCategory = await Expense.aggregate([
+      ...(Object.keys(expenseMatch).length > 0 ? [{ $match: expenseMatch }] : []),
       {
         $group: {
           _id: '$category',
@@ -151,10 +195,11 @@ export const getFinancialReport = async (req, res) => {
 
     // 3. Totals
     const [revTotal] = await Invoice.aggregate([
-      { $match: { status: 'paid' } },
+      { $match: invoiceMatch },
       { $group: { _id: null, total: { $sum: '$totalAmount' } } }
     ]);
     const [expTotal] = await Expense.aggregate([
+      ...(Object.keys(expenseMatch).length > 0 ? [{ $match: expenseMatch }] : []),
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
 
@@ -162,8 +207,12 @@ export const getFinancialReport = async (req, res) => {
     const totalExpenses = expTotal?.total || 0;
     const netProfit = totalRevenue - totalExpenses;
 
-    const invoices = await Invoice.find().sort({ createdAt: -1 }).limit(50);
-    const expenses = await Expense.find().sort({ date: -1 }).limit(50);
+    const dataLimit = Math.min(500, Math.max(1, parseInt(limit, 10) || 200));
+    const invQuery = Object.keys(invDateFilter).length > 0 ? { createdAt: invDateFilter } : {};
+    const expQuery = Object.keys(expDateFilter).length > 0 ? { date: expDateFilter } : {};
+
+    const invoices = await Invoice.find(invQuery).sort({ createdAt: -1 }).limit(dataLimit);
+    const expenses = await Expense.find(expQuery).sort({ date: -1 }).limit(dataLimit);
 
     return res.json({
       success: true,

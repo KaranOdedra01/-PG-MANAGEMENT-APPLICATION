@@ -1,6 +1,7 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -23,7 +24,8 @@ import {
   RefreshCw, 
   X,
   CreditCard,
-  Layers
+  Layers,
+  Sparkles
 } from 'lucide-react';
 
 const CATEGORY_META = {
@@ -31,6 +33,8 @@ const CATEGORY_META = {
   salary: { label: 'Staff Salary', icon: Users, color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
   water: { label: 'Water & RO Filter', icon: Droplet, color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
   maintenance: { label: 'Building Maintenance', icon: Wrench, color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
+  cleaning: { label: 'Housekeeping & Cleaning', icon: Sparkles, color: 'bg-teal-500/10 text-teal-400 border-teal-500/20' },
+  repairs: { label: 'Equipment & Repairs', icon: Wrench, color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
   internet: { label: 'WiFi & Internet', icon: Wifi, color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
   groceries: { label: 'Mess & Groceries', icon: ShoppingBag, color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   other: { label: 'Miscellaneous', icon: MoreHorizontal, color: 'bg-slate-800 text-slate-400 border-slate-700' }
@@ -46,6 +50,7 @@ export const Expenses = () => {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [monthFilter, setMonthFilter] = useState('all');
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -88,8 +93,20 @@ export const Expenses = () => {
       e.category.toLowerCase().includes(q) ||
       (e.receiptRef && e.receiptRef.toLowerCase().includes(q));
     const matchesCategory = categoryFilter === 'all' || e.category.toLowerCase() === categoryFilter.toLowerCase();
-    return matchesSearch && matchesCategory;
+    const matchesMonth = monthFilter === 'all' || (e.date && e.date.startsWith(monthFilter));
+    return matchesSearch && matchesCategory && matchesMonth;
   });
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    try {
+      await api.delete('/expenses/' + deleteTargetId);
+      setDeleteTargetId(null);
+      fetchData();
+    } catch (err) {
+      alert('Failed to delete expense');
+    }
+  };
   const openAddModal = () => {
     setEditingExpense(null);
     setFormData({
@@ -137,16 +154,6 @@ export const Expenses = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this expense record?')) {
-      try {
-        await api.delete('/expenses/' + id);
-        fetchData();
-      } catch (err) {
-        alert('Failed to delete expense');
-      }
-    }
-  };
 
   // Export Expenses to CSV
   const exportToCSV = () => {
@@ -172,6 +179,22 @@ export const Expenses = () => {
     link.click();
     document.body.removeChild(link);
   };
+
+  // Last 6 months expense trend aggregation
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const now = new Date();
+  const last6Months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    const total = expenses
+      .filter(e => e.date && e.date.startsWith(key))
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+    last6Months.push({ key, label, total });
+  }
+  const maxMonthly = Math.max(1, ...last6Months.map(m => m.total));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -244,7 +267,7 @@ export const Expenses = () => {
             <Layers className="w-4 h-4 text-indigo-400" />
             Spending Breakdown by Category
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
             {Object.entries(summary.categoryTotals).map(([catKey, total]) => {
               const meta = CATEGORY_META[catKey] || CATEGORY_META.other;
               const Icon = meta.icon;
@@ -262,6 +285,33 @@ export const Expenses = () => {
         </div>
       )}
 
+      {/* 6-Month Expense Trend */}
+      <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800">
+        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-rose-400" />
+          Monthly Expense Trend (Last 6 Months)
+        </h3>
+        <div className="space-y-3">
+          {last6Months.map((m) => {
+            const pct = Math.round((m.total / maxMonthly) * 100);
+            return (
+              <div key={m.key} className="space-y-1">
+                <div className="flex justify-between text-xs font-semibold">
+                  <span className="text-slate-300">{m.label}</span>
+                  <span className="text-rose-400 font-bold">₹{m.total.toLocaleString()}</span>
+                </div>
+                <div className="h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-rose-500 to-red-600 rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Search & Category Filter */}
       <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row gap-3 items-center justify-between">
         <div className="relative w-full sm:w-80">
@@ -275,7 +325,23 @@ export const Expenses = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <input
+            type="month"
+            value={monthFilter === 'all' ? '' : monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value || 'all')}
+            className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-rose-500"
+            title="Filter by Month"
+          />
+          {monthFilter !== 'all' && (
+            <button
+              onClick={() => setMonthFilter('all')}
+              className="text-xs text-rose-400 hover:text-rose-300 underline font-medium"
+            >
+              Clear Month
+            </button>
+          )}
+
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
@@ -286,6 +352,8 @@ export const Expenses = () => {
             <option value="salary">Staff Salary</option>
             <option value="water">Water & RO</option>
             <option value="maintenance">Maintenance</option>
+            <option value="cleaning">Housekeeping & Cleaning</option>
+            <option value="repairs">Repairs & Hardware</option>
             <option value="internet">Internet & WiFi</option>
             <option value="groceries">Groceries & Mess</option>
             <option value="other">Other</option>
@@ -360,7 +428,7 @@ export const Expenses = () => {
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDelete(exp._id)}
+                        onClick={() => setDeleteTargetId(exp._id)}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/20 text-slate-300 hover:text-rose-400 transition-colors"
                         title="Delete Expense"
                       >
@@ -412,6 +480,8 @@ export const Expenses = () => {
                   <option value="salary">Staff Salary</option>
                   <option value="water">Water & RO Filtration</option>
                   <option value="maintenance">Building Maintenance</option>
+                  <option value="cleaning">Housekeeping & Cleaning</option>
+                  <option value="repairs">Repairs & Hardware</option>
                   <option value="internet">WiFi & Internet</option>
                   <option value="groceries">Mess & Food Supplies</option>
                   <option value="other">Miscellaneous</option>
@@ -503,6 +573,15 @@ export const Expenses = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetId}
+        title="Delete Expense Record"
+        message="Are you sure you want to permanently delete this expense? This action cannot be undone."
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTargetId(null)}
+      />
     </div>
   );
 };

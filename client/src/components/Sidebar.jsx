@@ -14,7 +14,12 @@ import {
   FileText,
   LogOut,
   Building2,
-  X
+  X,
+  ClipboardList,
+  UserPlus,
+  Bell,
+  Settings,
+  User
 } from 'lucide-react';
 
 export const Sidebar = ({ isOpen, onClose }) => {
@@ -23,8 +28,10 @@ export const Sidebar = ({ isOpen, onClose }) => {
 
   const links = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'tenant', 'staff'] },
+    { to: '/my-tasks', label: 'My Tasks', icon: ClipboardList, roles: ['admin', 'staff'] },
     { to: '/rooms', label: 'Rooms & Beds', icon: DoorOpen, roles: ['admin', 'staff'] },
     { to: '/tenants', label: 'Tenants & KYC', icon: Users, roles: ['admin', 'staff'] },
+    { to: '/staff-management', label: 'Staff Management', icon: UserPlus, roles: ['admin'] },
     { to: '/invoices', label: role === 'tenant' ? 'My Invoices & Dues' : 'Rent & Invoicing', icon: Receipt, roles: ['admin', 'tenant', 'staff'] },
     { to: '/expenses', label: 'Expense Tracker', icon: DollarSign, roles: ['admin'] },
     { to: '/complaints', label: role === 'tenant' ? 'Raise Complaint' : 'Complaints Hub', icon: Wrench, roles: ['admin', 'tenant', 'staff'] },
@@ -32,6 +39,9 @@ export const Sidebar = ({ isOpen, onClose }) => {
     { to: '/mess', label: 'Mess & Food', icon: UtensilsCrossed, roles: ['admin', 'tenant', 'staff'] },
     { to: '/visitors', label: 'Visitor Logs', icon: ShieldCheck, roles: ['admin', 'staff'] },
     { to: '/reports', label: 'Reports & Analytics', icon: FileText, roles: ['admin'] },
+    { to: '/notifications', label: 'Notifications', icon: Bell, roles: ['admin', 'tenant', 'staff'] },
+    { to: '/settings', label: role === 'admin' ? 'PG Settings' : 'PG Info & Rules', icon: Settings, roles: ['admin', 'tenant', 'staff'] },
+    { to: '/profile', label: 'My Profile', icon: User, roles: ['admin', 'tenant', 'staff'] },
   ];
 
   const filteredLinks = links.filter((l) => l.roles.includes(role));

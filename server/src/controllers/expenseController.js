@@ -29,10 +29,19 @@ export const getExpenses = async (req, res) => {
     }
 
     if (month && month !== 'all') {
-      const date = new Date(month);
-      if (!isNaN(date.getTime())) {
-        const start = new Date(date.getFullYear(), date.getMonth(), 1);
-        const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
+      let start, end;
+      if (/^\d{4}-\d{2}$/.test(month)) {
+        const [year, m] = month.split('-').map(Number);
+        start = new Date(year, m - 1, 1, 0, 0, 0);
+        end = new Date(year, m, 0, 23, 59, 59, 999);
+      } else {
+        const date = new Date(month);
+        if (!isNaN(date.getTime())) {
+          start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0);
+          end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+        }
+      }
+      if (start && end) {
         query.date = { $gte: start, $lte: end };
       }
     }
